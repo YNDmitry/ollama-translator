@@ -86,6 +86,24 @@ final class QuickTranslatorViewModel: ObservableObject {
         SpeechHelper.shared.speakEnglish(candidate)
     }
 
+    func saveToVocab() {
+        guard !outputText.isEmpty, !inputText.isEmpty else { return }
+        let english: String
+        let russian: String
+        if lastResolvedDirection == .enToRu {
+            english = inputText
+            russian = outputText
+        } else if lastResolvedDirection == .polishEn {
+            english = outputText
+            russian = "Улучшенный вариант: \(inputText)"
+        } else {
+            english = outputText
+            russian = inputText
+        }
+        let added = VocabStore.shared.addCard(english: english, russian: russian)
+        statusText = added ? "★ Сохранено в тренажёр английского" : "Фраза уже в тренажёре"
+    }
+
     func explainPhrase() {
         guard !outputText.isEmpty, !inputText.isEmpty else { return }
         explainTask?.cancel()
@@ -297,6 +315,16 @@ struct QuickTranslatorView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(vm.outputText.isEmpty || vm.isTranslating || vm.isExplaining)
+
+                    Button {
+                        vm.saveToVocab()
+                    } label: {
+                        Label("Учить", systemImage: "bookmark")
+                            .font(.system(size: 11.5))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(vm.outputText.isEmpty || vm.isTranslating)
 
                     Button {
                         vm.copyOutput()

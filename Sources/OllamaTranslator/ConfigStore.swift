@@ -78,5 +78,6 @@ final class ConfigStore: ObservableObject {
         config.popupHotkey = .defaultPopup
         config.quickWindowHotkey = .defaultQuickWindow
         config.polishHotkey = .defaultPolish
+        config.flashcardsHotkey = .defaultFlashcards
     }
 }

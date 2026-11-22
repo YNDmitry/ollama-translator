@@ -27,6 +27,7 @@ struct TestRunner {
         assertEqual(cfg.popupHotkey.displayString, "⌃⌥P", "Default popup hotkey")
         assertEqual(cfg.polishHotkey.displayString, "⌃⌥E", "Default polish hotkey")
         assertEqual(cfg.quickWindowHotkey.displayString, "⌃⌥G", "Default quick window hotkey")
+        assertEqual(cfg.flashcardsHotkey.displayString, "⌃⌥L", "Default flashcards hotkey")
 
         // 3. Backward-compatible JSON decoding from v1.0 config (missing new fields)
         let v1JSON = """
@@ -44,6 +45,7 @@ struct TestRunner {
         assertEqual(decodedV1.defaultTone, .friendly, "v1 config preserves defaultTone")
         assertEqual(decodedV1.glossary.count, 1, "v1 config preserves glossary")
         assertEqual(decodedV1.polishHotkey.displayString, "⌃⌥E", "v1 config defaults new polishHotkey")
+        assertEqual(decodedV1.flashcardsHotkey.displayString, "⌃⌥L", "v1 config defaults new flashcardsHotkey")
         assertEqual(decodedV1.autoSelectAllWhenEmpty, true, "v1 config defaults new autoSelectAllWhenEmpty")
 
         // 4. Streaming preview & think-tag cleanup
@@ -91,6 +93,35 @@ struct TestRunner {
             "Созвон перенесена на завтра.",
             "Cyrillic exact replacement preserves capitalization"
         )
+
+        // 6. Spaced Repetition (SRS) scheduling, daily streak & Anki TSV export
+        let baseDate = Date(timeIntervalSince1970: 1_750_000_000)
+        var card = VocabCard(english: "Could we hop on a quick call?", russian: "Можем созвониться ненадолго?", note: "Client phrase", createdAt: baseDate, nextReviewAt: baseDate)
+        card = SRSScheduler.apply(rating: .good, to: card, now: baseDate)
+        assertEqual(card.repetitions, 1, "SRS first good sets repetitions=1")
+        assertEqual(card.intervalDays, 1.0, "SRS first good sets interval=1 day")
+
+        card = SRSScheduler.apply(rating: .good, to: card, now: baseDate.addingTimeInterval(86_400))
+        assertEqual(card.repetitions, 2, "SRS second good sets repetitions=2")
+        assertEqual(card.intervalDays, 3.0, "SRS second good sets interval=3 days")
+
+        card = SRSScheduler.apply(rating: .again, to: card, now: baseDate.addingTimeInterval(4 * 86_400))
+        assertEqual(card.repetitions, 0, "SRS again resets repetitions")
+        assertEqual(card.intervalDays, 0.0, "SRS again resets intervalDays")
+
+        var stats = VocabStats()
+        stats = SRSScheduler.updatedStats(stats, now: baseDate)
+        assertEqual(stats.streakDays, 1, "First review sets streak=1")
+        assertEqual(stats.totalReviews, 1, "Total reviews increments")
+        stats = SRSScheduler.updatedStats(stats, now: baseDate.addingTimeInterval(3600))
+        assertEqual(stats.streakDays, 1, "Same-day second review keeps streak=1")
+        stats = SRSScheduler.updatedStats(stats, now: baseDate.addingTimeInterval(86_400))
+        assertEqual(stats.streakDays, 2, "Next-day review increments streak=2")
+
+        let tsv = SRSScheduler.exportAnkiTSV(cards: [
+            VocabCard(english: "Heads-up", russian: "Предупреждение", note: "Line 1\nLine 2")
+        ])
+        assertEqual(tsv, "Heads-up\tПредупреждение\tLine 1<br>Line 2", "Anki TSV export escapes newlines cleanly")
 
         print("All logic assertions passed!")
     }

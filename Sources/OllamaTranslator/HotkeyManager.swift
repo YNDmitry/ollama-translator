@@ -6,6 +6,7 @@ enum HotkeyAction: UInt32, CaseIterable {
     case translatePopup = 2
     case openQuickWindow = 3
     case polishEnglish = 4
+    case openFlashcards = 5
 }
 
 final class HotkeyManager {
@@ -32,6 +33,7 @@ final class HotkeyManager {
         register(action: .translatePopup, binding: config.popupHotkey)
         register(action: .openQuickWindow, binding: config.quickWindowHotkey)
         register(action: .polishEnglish, binding: config.polishHotkey)
+        register(action: .openFlashcards, binding: config.flashcardsHotkey)
     }
 
     func unregisterAll() {

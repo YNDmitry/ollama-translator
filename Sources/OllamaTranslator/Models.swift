@@ -126,6 +126,11 @@ struct HotkeyBinding: Codable, Equatable {
         modifiers: UInt32(controlKey | optionKey)
     )
 
+    static let defaultFlashcards = HotkeyBinding(
+        keyCode: UInt32(kVK_ANSI_L),
+        modifiers: UInt32(controlKey | optionKey)
+    )
+
     var displayString: String {
         var parts = ""
         if (modifiers & UInt32(controlKey)) != 0 { parts += "⌃" }
@@ -147,6 +152,7 @@ struct AppConfig: Codable, Equatable {
     var popupHotkey: HotkeyBinding = .defaultPopup
     var quickWindowHotkey: HotkeyBinding = .defaultQuickWindow
     var polishHotkey: HotkeyBinding = .defaultPolish
+    var flashcardsHotkey: HotkeyBinding = .defaultFlashcards
     var glossary: [GlossaryEntry] = []
     var restoreClipboardAfterReplace: Bool = true
     var autoSelectAllWhenEmpty: Bool = true
@@ -166,6 +172,7 @@ struct AppConfig: Codable, Equatable {
         popupHotkey = (try? c.decodeIfPresent(HotkeyBinding.self, forKey: .popupHotkey)) ?? d.popupHotkey
         quickWindowHotkey = (try? c.decodeIfPresent(HotkeyBinding.self, forKey: .quickWindowHotkey)) ?? d.quickWindowHotkey
         polishHotkey = (try? c.decodeIfPresent(HotkeyBinding.self, forKey: .polishHotkey)) ?? d.polishHotkey
+        flashcardsHotkey = (try? c.decodeIfPresent(HotkeyBinding.self, forKey: .flashcardsHotkey)) ?? d.flashcardsHotkey
         glossary = (try? c.decodeIfPresent([GlossaryEntry].self, forKey: .glossary)) ?? d.glossary
         restoreClipboardAfterReplace = (try? c.decodeIfPresent(Bool.self, forKey: .restoreClipboardAfterReplace)) ?? d.restoreClipboardAfterReplace
         autoSelectAllWhenEmpty = (try? c.decodeIfPresent(Bool.self, forKey: .autoSelectAllWhenEmpty)) ?? d.autoSelectAllWhenEmpty
@@ -189,6 +196,35 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     var direction: TranslationDirection
     var tone: TonePreset
     var durationMs: Int
+}
+
+enum ReviewRating: String, Codable, CaseIterable {
+    case again
+    case good
+    case easy
+}
+
+struct VocabCard: Codable, Identifiable, Equatable {
+    var id: UUID = UUID()
+    var english: String
+    var russian: String
+    var note: String = ""
+    var createdAt: Date = Date()
+    var intervalDays: Double = 0
+    var easeFactor: Double = 2.5
+    var repetitions: Int = 0
+    var nextReviewAt: Date = Date()
+}
+
+struct VocabStats: Codable, Equatable {
+    var streakDays: Int = 0
+    var lastStudyDay: String? = nil
+    var totalReviews: Int = 0
+}
+
+struct VocabDatabase: Codable, Equatable {
+    var cards: [VocabCard] = []
+    var stats: VocabStats = VocabStats()
 }
 
 enum KeyCodeMapper {

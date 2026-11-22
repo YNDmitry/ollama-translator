@@ -120,6 +120,8 @@ final class SettingsViewModel: ObservableObject {
                     store.config.quickWindowHotkey = newBinding
                 case .polishEnglish:
                     store.config.polishHotkey = newBinding
+                case .openFlashcards:
+                    store.config.flashcardsHotkey = newBinding
                 }
                 self.stopRecording()
                 onHotkeysUpdated()
@@ -459,6 +461,13 @@ private struct HotkeysSettingsTab: View {
                     action: .openQuickWindow,
                     binding: store.config.quickWindowHotkey
                 )
+
+                hotkeyRow(
+                    title: "Открыть тренажёр английского (Карточки SRS)",
+                    subtitle: "Интервальное повторение сохранённых фраз, озвучка и проверка с ИИ",
+                    action: .openFlashcards,
+                    binding: store.config.flashcardsHotkey
+                )
             }
 
             Section {
@@ -568,6 +577,18 @@ private struct HistorySettingsTab: View {
                                     .foregroundColor(.secondary)
 
                                 Spacer()
+
+                                Button {
+                                    let en = (entry.direction == .enToRu) ? entry.originalText : entry.translatedText
+                                    let ru = (entry.direction == .enToRu) ? entry.translatedText : entry.originalText
+                                    VocabStore.shared.addCard(english: en, russian: ru)
+                                } label: {
+                                    Image(systemName: VocabStore.shared.contains(english: (entry.direction == .enToRu) ? entry.originalText : entry.translatedText) ? "bookmark.fill" : "bookmark")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.orange)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Сохранить фразу в тренажёр английского")
 
                                 Button {
                                     vm.copyHistoryItem(entry)

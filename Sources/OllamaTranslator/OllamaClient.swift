@@ -298,6 +298,53 @@ final class OllamaClient {
         return cleaned
     }
 
+    /// Evaluates a user's typed English attempt during active flashcard practice.
+    func evaluatePracticeAttemptStream(
+        russianPrompt: String,
+        referenceEnglish: String,
+        userEnglish: String,
+        config: AppConfig,
+        onPartial: (@Sendable (String) -> Void)?
+    ) async throws -> String {
+        let attempt = userEnglish.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !attempt.isEmpty else { throw OllamaError.emptyResponse }
+
+        let systemPrompt = """
+        Ты дружелюбный и лаконичный преподаватель делового английского.
+        Пользователь тренируется переводить фразу с русского на английский.
+        Оцени его вариант строго НА РУССКОМ языке (максимум 70–90 слов).
+        Если его вариант отличается от эталона, но грамматически верный и естественный — обязательно похвали его!
+        Формат:
+        • Первая строка: один из статусов — `✅ Отлично!`, `🟡 Почти идеально` или `🔴 Есть неточности`.
+        • 1–2 коротких пояснения (если есть ошибки или как сказать естественнее).
+        • Если нужно — улучшенный вариант на английском.
+        """
+
+        let userPrompt = """
+        Русская фраза: \(russianPrompt)
+        Эталонный вариант: \(referenceEnglish)
+        Вариант пользователя: \(attempt)
+        """
+
+        let raw = try await streamChat(
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            config: config,
+            temperature: 0.25
+        ) { accumulated in
+            if let cb = onPartial {
+                let live = self.cleanStreamingPreview(accumulated, originalCore: attempt)
+                if !live.isEmpty {
+                    cb(live)
+                }
+            }
+        }
+
+        let cleaned = cleanModelOutput(raw, originalCore: attempt)
+        guard !cleaned.isEmpty else { throw OllamaError.emptyResponse }
+        return cleaned
+    }
+
     private func streamChat(
         systemPrompt: String,
         userPrompt: String,

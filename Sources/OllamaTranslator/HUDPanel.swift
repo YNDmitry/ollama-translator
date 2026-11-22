@@ -40,6 +40,7 @@ final class HUDViewModel: ObservableObject {
     @Published var explanationText: String = ""
     @Published var isExplaining: Bool = false
     @Published var explanationError: String? = nil
+    @Published var isSavedToVocab: Bool = false
 
     var onCopy: ((String) -> Void)?
     var onReplace: ((String) -> Void)?
@@ -48,6 +49,7 @@ final class HUDViewModel: ObservableObject {
     var onPolishResult: (() -> Void)?
     var onSpeakEnglish: ((String) -> Void)?
     var onExplainPhrase: (() -> Void)?
+    var onSaveToVocab: (() -> Void)?
     var onSendReply: ((String) -> Void)?
     var onPasteReply: ((String) -> Void)?
     var onAddQuickGlossary: ((String, String, TranslationDirection, GlossaryMatchMode) -> Void)?
@@ -122,6 +124,10 @@ final class HUDController {
     var onExplainPhrase: (() -> Void)? {
         get { viewModel.onExplainPhrase }
         set { viewModel.onExplainPhrase = newValue }
+    }
+    var onSaveToVocab: (() -> Void)? {
+        get { viewModel.onSaveToVocab }
+        set { viewModel.onSaveToVocab = newValue }
     }
     var onSendReply: ((String) -> Void)? {
         get { viewModel.onSendReply }
@@ -491,6 +497,17 @@ private struct HUDRootView: View {
                 .buttonStyle(.plain)
                 .disabled(vm.isStreaming || vm.translatedText.isEmpty)
                 .help("Разбор фразы и полезной лексики (English Coach)")
+
+                Button {
+                    vm.onSaveToVocab?()
+                } label: {
+                    Image(systemName: vm.isSavedToVocab ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(vm.isSavedToVocab ? .orange : .secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.isStreaming || vm.translatedText.isEmpty)
+                .help(vm.isSavedToVocab ? "Уже в тренажёре английского" : "Сохранить фразу в тренажёр английского")
 
                 Button {
                     vm.onRegenerate?()
