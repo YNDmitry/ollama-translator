@@ -35,11 +35,19 @@ final class HUDViewModel: ObservableObject {
     @Published var quickGlossMode: GlossaryMatchMode = .promptHint
     @Published var quickGlossSavedNotice: Bool = false
 
+    // Inline AI English Coach ("Разбор фразы")
+    @Published var showExplanation: Bool = false
+    @Published var explanationText: String = ""
+    @Published var isExplaining: Bool = false
+    @Published var explanationError: String? = nil
+
     var onCopy: ((String) -> Void)?
     var onReplace: ((String) -> Void)?
     var onChangeTone: ((TonePreset) -> Void)?
     var onRegenerate: (() -> Void)?
     var onPolishResult: (() -> Void)?
+    var onSpeakEnglish: ((String) -> Void)?
+    var onExplainPhrase: (() -> Void)?
     var onSendReply: ((String) -> Void)?
     var onPasteReply: ((String) -> Void)?
     var onAddQuickGlossary: ((String, String, TranslationDirection, GlossaryMatchMode) -> Void)?
@@ -47,6 +55,11 @@ final class HUDViewModel: ObservableObject {
     var onCancelWork: (() -> Void)?
     var onClose: (() -> Void)?
     var onLayoutChanged: (() -> Void)?
+
+    var englishTextForSpeech: String {
+        let raw = (direction == .enToRu) ? originalText : translatedText
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     func resetPopupDrawers() {
         showOriginal = false
@@ -59,6 +72,10 @@ final class HUDViewModel: ObservableObject {
         quickGlossSource = ""
         quickGlossTarget = ""
         quickGlossSavedNotice = false
+        showExplanation = false
+        explanationText = ""
+        isExplaining = false
+        explanationError = nil
     }
 }
 
@@ -97,6 +114,14 @@ final class HUDController {
     var onPolishResult: (() -> Void)? {
         get { viewModel.onPolishResult }
         set { viewModel.onPolishResult = newValue }
+    }
+    var onSpeakEnglish: ((String) -> Void)? {
+        get { viewModel.onSpeakEnglish }
+        set { viewModel.onSpeakEnglish = newValue }
+    }
+    var onExplainPhrase: (() -> Void)? {
+        get { viewModel.onExplainPhrase }
+        set { viewModel.onExplainPhrase = newValue }
     }
     var onSendReply: ((String) -> Void)? {
         get { viewModel.onSendReply }
@@ -246,13 +271,14 @@ final class HUDController {
 
         var height: CGFloat = CGFloat(162 + estimatedLines * 20)
         if viewModel.showOriginal { height += 84 }
+        if viewModel.showExplanation { height += 130 }
         if viewModel.showQuickGlossary { height += 66 }
         if viewModel.showReplyBox {
             height += viewModel.replyOutput.isEmpty ? 78 : 162
         }
 
-        let clampedHeight = min(max(height, 215), 590)
-        presentSized(width: 470, height: clampedHeight, interactive: true)
+        let clampedHeight = min(max(height, 215), 650)
+        presentSized(width: 480, height: clampedHeight, interactive: true)
     }
 
     private func presentSized(width: CGFloat, height: CGFloat, interactive: Bool) {
@@ -335,7 +361,7 @@ final class HUDController {
     }
 
     private func handlePopupEsc() {
-        if viewModel.isStreaming || viewModel.isGeneratingReply {
+        if viewModel.isStreaming || viewModel.isGeneratingReply || viewModel.isExplaining {
             viewModel.onCancelWork?()
         } else {
             hide()
@@ -441,6 +467,32 @@ private struct HUDRootView: View {
                 Spacer()
 
                 Button {
+                    vm.onSpeakEnglish?(vm.englishTextForSpeech)
+                } label: {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.englishTextForSpeech.isEmpty)
+                .help("Озвучить английскую фразу")
+
+                Button {
+                    vm.showExplanation.toggle()
+                    vm.onLayoutChanged?()
+                    if vm.showExplanation && vm.explanationText.isEmpty && !vm.isExplaining {
+                        vm.onExplainPhrase?()
+                    }
+                } label: {
+                    Image(systemName: vm.showExplanation ? "graduationcap.fill" : "graduationcap")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundColor(vm.showExplanation ? .accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.isStreaming || vm.translatedText.isEmpty)
+                .help("Разбор фразы и полезной лексики (English Coach)")
+
+                Button {
                     vm.onRegenerate?()
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -527,6 +579,49 @@ private struct HUDRootView: View {
                             .foregroundColor(.secondary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+
+            // Inline AI English Coach breakdown
+            if vm.showExplanation {
+                Divider()
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Label("Разбор английского", systemImage: "graduationcap.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.accentColor)
+                        if vm.isExplaining {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Spacer()
+                        Button {
+                            vm.explanationText = ""
+                            vm.onExplainPhrase?()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10.5))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(vm.isExplaining)
+                    }
+
+                    if let err = vm.explanationError {
+                        Text(err)
+                            .font(.system(size: 11.5))
+                            .foregroundColor(.red)
+                    } else {
+                        ScrollView {
+                            Text(vm.explanationText.isEmpty ? "Разбираю лексику и стиль..." : vm.explanationText)
+                                .font(.system(size: 12))
+                                .foregroundColor(vm.explanationText.isEmpty ? .secondary : .primary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(7)
+                        }
+                        .frame(maxHeight: 110)
+                        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
             }

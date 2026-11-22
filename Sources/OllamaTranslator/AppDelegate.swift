@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var currentTask: Task<Void, Never>?
     private var replyTask: Task<Void, Never>?
+    private var explainTask: Task<Void, Never>?
     private var lastPopupResult: TranslationResult?
     private var lastTargetApp: NSRunningApplication?
     private var pendingClipboardSnapshot: PasteboardSnapshot?
@@ -171,6 +172,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             )
         }
 
+        hud.onSpeakEnglish = { text in
+            SpeechHelper.shared.speakEnglish(text)
+        }
+
+        hud.onExplainPhrase = { [weak self] in
+            guard let self = self else { return }
+            let orig = self.hud.viewModel.originalText
+            let trans = self.hud.viewModel.translatedText
+            let dir = self.hud.viewModel.direction
+            let cfg = self.configStore.config
+
+            self.explainTask?.cancel()
+            self.hud.viewModel.explanationError = nil
+            self.hud.viewModel.explanationText = ""
+            self.hud.viewModel.isExplaining = true
+            self.isTranslating = true
+
+            self.explainTask = Task { @MainActor in
+                do {
+                    let explanation = try await self.ollamaClient.explainPhraseStream(
+                        originalText: orig,
+                        translatedText: trans,
+                        direction: dir,
+                        config: cfg
+                    ) { [weak self] partial in
+                        Task { @MainActor in
+                            self?.hud.viewModel.explanationText = partial
+                        }
+                    }
+                    guard !Task.isCancelled else { return }
+                    self.hud.viewModel.explanationText = explanation
+                    self.hud.viewModel.isExplaining = false
+                    self.isTranslating = false
+                } catch OllamaError.cancelled {
+                    self.hud.viewModel.isExplaining = false
+                    self.isTranslating = false
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    self.hud.viewModel.explanationError = error.localizedDescription
+                    self.hud.viewModel.isExplaining = false
+                    self.isTranslating = false
+                }
+            }
+        }
+
         hud.onSendReply = { [weak self] russianReply in
             guard let self = self else { return }
             let clientMessage = self.hud.viewModel.originalText
@@ -232,9 +278,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self = self else { return }
             self.currentTask?.cancel()
             self.replyTask?.cancel()
+            self.explainTask?.cancel()
+            SpeechHelper.shared.stop()
             self.isTranslating = false
             self.hud.viewModel.isStreaming = false
             self.hud.viewModel.isGeneratingReply = false
+            self.hud.viewModel.isExplaining = false
             if let saved = self.pendingClipboardSnapshot {
                 TextAutomation.restorePasteboard(saved)
                 self.pendingClipboardSnapshot = nil

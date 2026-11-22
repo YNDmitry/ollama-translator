@@ -10,9 +10,15 @@ final class QuickTranslatorViewModel: ObservableObject {
     @Published var isTranslating: Bool = false
     @Published var statusText: String = ""
     @Published var errorMessage: String?
+    @Published var lastResolvedDirection: TranslationDirection = .ruToEn
+
+    // AI English Coach breakdown
+    @Published var explanationText: String = ""
+    @Published var isExplaining: Bool = false
 
     private let client: OllamaClient
     private var activeTask: Task<Void, Never>?
+    private var explainTask: Task<Void, Never>?
 
     init(client: OllamaClient) {
         self.client = client
@@ -24,9 +30,12 @@ final class QuickTranslatorViewModel: ObservableObject {
 
         let previousOutput = alternative ? outputText : nil
         activeTask?.cancel()
+        explainTask?.cancel()
         isTranslating = true
+        isExplaining = false
         errorMessage = nil
         outputText = ""
+        explanationText = ""
         statusText = alternative ? "Подбираю другой вариант..." : "Перевожу..."
 
         let cfg = ConfigStore.shared.config
@@ -48,6 +57,7 @@ final class QuickTranslatorViewModel: ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
                 self.outputText = res.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.lastResolvedDirection = res.direction
                 self.statusText = "\(res.direction.shortBadge) • \(String(format: "%.1f", Double(res.durationMs) / 1000.0)) сек"
                 self.isTranslating = false
                 HistoryStore.shared.record(res)
@@ -65,8 +75,52 @@ final class QuickTranslatorViewModel: ObservableObject {
 
     func cancel() {
         activeTask?.cancel()
+        explainTask?.cancel()
         isTranslating = false
+        isExplaining = false
         statusText = "Отменено"
+    }
+
+    func speakEnglish() {
+        let candidate = (lastResolvedDirection == .enToRu) ? inputText : outputText
+        SpeechHelper.shared.speakEnglish(candidate)
+    }
+
+    func explainPhrase() {
+        guard !outputText.isEmpty, !inputText.isEmpty else { return }
+        explainTask?.cancel()
+        isExplaining = true
+        explanationText = ""
+        errorMessage = nil
+
+        let cfg = ConfigStore.shared.config
+        let orig = inputText
+        let trans = outputText
+        let dir = lastResolvedDirection
+
+        explainTask = Task {
+            do {
+                let text = try await client.explainPhraseStream(
+                    originalText: orig,
+                    translatedText: trans,
+                    direction: dir,
+                    config: cfg
+                ) { [weak self] partial in
+                    Task { @MainActor in
+                        self?.explanationText = partial
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                self.explanationText = text
+                self.isExplaining = false
+            } catch OllamaError.cancelled {
+                self.isExplaining = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.errorMessage = error.localizedDescription
+                self.isExplaining = false
+            }
+        }
     }
 
     func copyOutput() {
@@ -216,6 +270,34 @@ struct QuickTranslatorView: View {
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundColor(.secondary)
                     Spacer()
+
+                    Button {
+                        vm.speakEnglish()
+                    } label: {
+                        Label("Озвучить", systemImage: "speaker.wave.2")
+                            .font(.system(size: 11.5))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(vm.outputText.isEmpty)
+
+                    Button {
+                        vm.explainPhrase()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if vm.isExplaining {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "graduationcap")
+                            }
+                            Text("Разобрать")
+                        }
+                        .font(.system(size: 11.5))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(vm.outputText.isEmpty || vm.isTranslating || vm.isExplaining)
+
                     Button {
                         vm.copyOutput()
                     } label: {
@@ -242,6 +324,25 @@ struct QuickTranslatorView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                 )
+
+                if vm.isExplaining || !vm.explanationText.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Разбор английского", systemImage: "graduationcap.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.accentColor)
+                        ScrollView {
+                            Text(vm.explanationText.isEmpty ? "Разбираю лексику и стиль..." : vm.explanationText)
+                                .font(.system(size: 12.5))
+                                .foregroundColor(vm.explanationText.isEmpty ? .secondary : .primary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                        }
+                        .frame(minHeight: 75, maxHeight: 130)
+                        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .padding(.top, 4)
+                }
             }
         }
         .padding(16)
