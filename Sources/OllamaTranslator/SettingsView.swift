@@ -185,6 +185,7 @@ struct SettingsRootView: View {
 private struct GeneralSettingsTab: View {
     @ObservedObject var store: ConfigStore
     @ObservedObject var vm: SettingsViewModel
+    @ObservedObject var downloader = KokoroDownloader.shared
     let ollamaClient: OllamaClient
 
     var body: some View {
@@ -272,21 +273,57 @@ private struct GeneralSettingsTab: View {
                         }
                     }
 
-                    HStack(spacing: 8) {
-                        Image(systemName: vm.kokoroInstalled ? "checkmark.seal.fill" : "arrow.down.circle")
-                            .foregroundColor(vm.kokoroInstalled ? .green : .orange)
-                        Text(vm.kokoroInstalled
-                             ? (SpeechHelper.isUsingRustBackend
-                                ? "Kokoro-82M готов (нативный Rust-движок — без Python, автовыгрузка 10 мин)"
-                                : "Kokoro-82M установлен и работает локально офлайн")
-                             : "Файлы модели Kokoro не скачаны — запустите scripts/setup_kokoro_tts.sh")
-                            .font(.system(size: 11.5))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Button("Обновить") {
-                            vm.refreshSystemStatus()
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Image(systemName: vm.kokoroInstalled ? "checkmark.seal.fill" : "arrow.down.circle")
+                                .foregroundColor(vm.kokoroInstalled ? .green : .orange)
+                            Text(vm.kokoroInstalled
+                                 ? (SpeechHelper.isUsingRustBackend
+                                    ? "Kokoro-82M готов (нативный Rust-движок — без Python, автовыгрузка 10 мин)"
+                                    : "Kokoro-82M установлен и работает локально офлайн")
+                                 : "Файлы модели Kokoro (~338 МБ) не скачаны — используется системный голос")
+                                .font(.system(size: 11.5))
+                                .foregroundColor(.secondary)
+                            Spacer()
+
+                            if downloader.isDownloading {
+                                Button("Отмена") {
+                                    downloader.cancel()
+                                }
+                                .controlSize(.small)
+                            } else if !vm.kokoroInstalled {
+                                Button("Скачать модель (~338 МБ)") {
+                                    downloader.startDownload {
+                                        vm.refreshSystemStatus()
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                            } else {
+                                Button("Удалить веса") {
+                                    downloader.removeModels {
+                                        vm.refreshSystemStatus()
+                                    }
+                                }
+                                .controlSize(.small)
+                            }
                         }
-                        .controlSize(.small)
+
+                        if downloader.isDownloading {
+                            ProgressView(value: downloader.progress)
+                                .progressViewStyle(.linear)
+                            Text(downloader.statusText)
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        } else if let err = downloader.errorMessage {
+                            Text(err)
+                                .font(.system(size: 11))
+                                .foregroundColor(.red)
+                        } else if !downloader.statusText.isEmpty {
+                            Text(downloader.statusText)
+                                .font(.system(size: 11))
+                                .foregroundColor(.green)
+                        }
                     }
                 } else {
                     Picker("Системный голос EN", selection: $store.config.systemVoiceIdentifier) {

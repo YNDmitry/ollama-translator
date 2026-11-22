@@ -6,17 +6,24 @@
 
 Полностью локально и приватно, без платных API. По умолчанию настроено на модель `hf.co/mradermacher/Qwen3.5-4B-SOMPOA-heresy-v2-GGUF:Q4_K_M` (работает с любой моделью Ollama).
 
+<p align="center">
+  <img src="docs/assets/popup-hud.png" alt="Всплывающее окно перевода с AI English Coach и ответом клиенту" width="46%" />
+  &nbsp;
+  <img src="docs/assets/english-trainer.png" alt="Тренажёр английского SRS с проверкой от ИИ и озвучкой Kokoro Rust" width="51%" />
+</p>
+
 ## Скачать готовую сборку
 
 Скачайте готовое приложение для Apple Silicon в **[GitHub Releases](https://github.com/YNDmitry/ollama-translator/releases/latest)**:
 
-1. Скачайте и распакуйте `OllamaTranslator-v2.0.0-arm64.zip`.
+1. Скачайте и распакуйте `OllamaTranslator-v2.5.0-arm64.zip`.
 2. Перенесите `OllamaTranslator.app` в папку `/Applications/`.
 3. Если macOS предупредит о неподписанном разработчике, снимите карантин:
    ```bash
    xattr -dr com.apple.quarantine /Applications/OllamaTranslator.app
    ```
 4. Запустите приложение и выдайте разрешение **Системные настройки → Конфиденциальность и безопасность → Универсальный доступ (Accessibility)**.
+5. *(Опционально)* В **Настройки → Основные → Озвучка произношения (TTS)** нажмите **«Скачать модель (~338 МБ)»** для живого офлайн-голоса **Kokoro-82M** — без терминала и без Python!
 
 ## Горячие клавиши (работают в любой раскладке RU / EN)
 
@@ -49,6 +56,18 @@
 - **История переводов** — последние 50 переводов с поиском в Настройках и быстрым копированием последних 10 прямо из меню-бара.
 - **Оптимизация под Qwen3.5** — автоматически отключает режим рассуждений (`think: false`), вырезает теги `<think>` и удерживает модель в памяти (`keep_alive: 30m`).
 - **Статус Ollama в меню-баре** — показывает подключение и умеет запускать Ollama в 1 клик.
+
+## Гибридная архитектура
+
+```mermaid
+flowchart LR
+    UI["Swift-приложение macOS\n(AppKit + SwiftUI + Carbon Hotkeys)"]
+    LLM["Локальный Ollama API\n(Qwen3.5-4B • think:false • keep_alive)"]
+    TTS["Встроенный Rust-движок\n(kokoro-tts-rs • ONNX + Misaki G2P)"]
+
+    UI <-->|"Стриминг /api/chat"| LLM
+    UI <-->|"Локальный HTTP 127.0.0.1:18421\n(автовыгрузка 10 мин + LRU-кэш)"| TTS
+```
 
 ## Сборка из исходников
 
