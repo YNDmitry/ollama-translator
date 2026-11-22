@@ -275,16 +275,16 @@ final class HUDController {
         let lineBreaks = viewModel.translatedText.components(separatedBy: "\n").count
         let estimatedLines = max(2, min(11, textLen / 54 + lineBreaks))
 
-        var height: CGFloat = CGFloat(162 + estimatedLines * 20)
-        if viewModel.showOriginal { height += 84 }
-        if viewModel.showExplanation { height += 130 }
-        if viewModel.showQuickGlossary { height += 66 }
+        var height: CGFloat = CGFloat(170 + estimatedLines * 20)
+        if viewModel.showOriginal { height += 90 }
+        if viewModel.showExplanation { height += 195 }
+        if viewModel.showQuickGlossary { height += 72 }
         if viewModel.showReplyBox {
-            height += viewModel.replyOutput.isEmpty ? 78 : 162
+            height += viewModel.replyOutput.isEmpty ? 84 : 195
         }
 
-        let clampedHeight = min(max(height, 215), 650)
-        presentSized(width: 480, height: clampedHeight, interactive: true)
+        let clampedHeight = min(max(height, 220), 720)
+        presentSized(width: 510, height: clampedHeight, interactive: true)
     }
 
     private func presentSized(width: CGFloat, height: CGFloat, interactive: Bool) {
@@ -631,13 +631,15 @@ private struct HUDRootView: View {
                     } else {
                         ScrollView {
                             Text(vm.explanationText.isEmpty ? "Разбираю лексику и стиль..." : vm.explanationText)
-                                .font(.system(size: 12))
+                                .font(.system(size: 12.5))
+                                .lineSpacing(2.5)
                                 .foregroundColor(vm.explanationText.isEmpty ? .secondary : .primary)
                                 .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(7)
+                                .padding(8)
                         }
-                        .frame(maxHeight: 110)
+                        .frame(minHeight: 80, maxHeight: 190)
                         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
@@ -732,12 +734,13 @@ private struct HUDRootView: View {
                     } else if !vm.replyOutput.isEmpty {
                         ScrollView {
                             Text(vm.replyOutput)
-                                .font(.system(size: 13))
+                                .font(.system(size: 13.5))
                                 .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(6)
+                                .padding(8)
                         }
-                        .frame(maxHeight: 72)
+                        .frame(minHeight: 54, maxHeight: 130)
                         .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 
                         HStack(spacing: 8) {

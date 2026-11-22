@@ -4,3 +4,5 @@ dist/
 *.swp
 .swiftpm/
 xcuserdata/
+__pycache__/
+*.pyc

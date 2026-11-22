@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        SpeechHelper.shared.shutdownDaemon()
+    }
+
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateStatusIcon()
@@ -857,6 +861,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "Тренажёр английского (SRS)"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 680, height: 640))
         window.isReleasedWhenClosed = false
         window.center()
 

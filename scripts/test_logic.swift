@@ -47,6 +47,9 @@ struct TestRunner {
         assertEqual(decodedV1.polishHotkey.displayString, "⌃⌥E", "v1 config defaults new polishHotkey")
         assertEqual(decodedV1.flashcardsHotkey.displayString, "⌃⌥L", "v1 config defaults new flashcardsHotkey")
         assertEqual(decodedV1.autoSelectAllWhenEmpty, true, "v1 config defaults new autoSelectAllWhenEmpty")
+        assertEqual(decodedV1.ttsEngine, .kokoro, "v1 config defaults new ttsEngine")
+        assertEqual(decodedV1.kokoroVoice, "af_heart", "v1 config defaults new kokoroVoice")
+        assertEqual(decodedV1.ttsSpeed, 0.95, "v1 config defaults new ttsSpeed")
 
         // 4. Streaming preview & think-tag cleanup
         let client = OllamaClient()
