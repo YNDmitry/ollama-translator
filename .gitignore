@@ -6,3 +6,4 @@ dist/
 xcuserdata/
 __pycache__/
 *.pyc
+rust-tts/target/

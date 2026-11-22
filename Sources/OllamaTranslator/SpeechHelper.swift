@@ -41,6 +41,21 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         appSupportDir.appendingPathComponent("kokoro", isDirectory: true)
     }
 
+    static var kokoroRustBinaryURL: URL? {
+        let fm = FileManager.default
+        if let execDir = Bundle.main.executableURL?.deletingLastPathComponent() {
+            let bundled = execDir.appendingPathComponent("kokoro-tts-rs")
+            if fm.isExecutableFile(atPath: bundled.path) {
+                return bundled
+            }
+        }
+        let devFallback = URL(fileURLWithPath: "/Users/dmitry/Projects/ollama-translator/rust-tts/target/release/kokoro-tts-rs")
+        if fm.isExecutableFile(atPath: devFallback.path) {
+            return devFallback
+        }
+        return nil
+    }
+
     static var kokoroServerScriptURL: URL? {
         if let bundled = Bundle.main.url(forResource: "kokoro_tts_server", withExtension: "py") {
             return bundled
@@ -52,12 +67,24 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         return nil
     }
 
-    static var isKokoroInstalled: Bool {
+    static var hasKokoroModelFiles: Bool {
         let fm = FileManager.default
-        return fm.fileExists(atPath: kokoroPythonURL.path) &&
-               fm.fileExists(atPath: kokoroModelDir.appendingPathComponent("kokoro-v1.0.onnx").path) &&
-               fm.fileExists(atPath: kokoroModelDir.appendingPathComponent("voices-v1.0.bin").path) &&
-               kokoroServerScriptURL != nil
+        let hasModel = fm.fileExists(atPath: kokoroModelDir.appendingPathComponent("kokoro-v1.0.onnx").path) ||
+                       fm.fileExists(atPath: kokoroModelDir.appendingPathComponent("kokoro-v1.0.int8.onnx").path)
+        let hasVoices = fm.fileExists(atPath: kokoroModelDir.appendingPathComponent("voices-v1.0.bin").path)
+        return hasModel && hasVoices
+    }
+
+    static var hasPythonKokoroFallback: Bool {
+        FileManager.default.fileExists(atPath: kokoroPythonURL.path) && kokoroServerScriptURL != nil
+    }
+
+    static var isKokoroInstalled: Bool {
+        hasKokoroModelFiles && (kokoroRustBinaryURL != nil || hasPythonKokoroFallback)
+    }
+
+    static var isUsingRustBackend: Bool {
+        kokoroRustBinaryURL != nil
     }
 
     static func installedEnglishSystemVoices() -> [AVSpeechSynthesisVoice] {
@@ -228,16 +255,26 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         }
 
         if kokoroProcess == nil || kokoroProcess?.isRunning == false {
-            guard let scriptURL = Self.kokoroServerScriptURL else { return false }
             let proc = Process()
-            proc.executableURL = Self.kokoroPythonURL
-            proc.arguments = [
-                scriptURL.path,
+            let commonArgs = [
                 "--port", String(kokoroPort),
                 "--model-dir", Self.kokoroModelDir.path,
                 "--idle-timeout", String(kokoroIdleTimeoutSec),
                 "--parent-pid", String(ProcessInfo.processInfo.processIdentifier)
             ]
+
+            if let rustBin = Self.kokoroRustBinaryURL {
+                // Prefer zero-Python native Rust binary bundled inside the .app
+                proc.executableURL = rustBin
+                proc.arguments = commonArgs
+            } else if let scriptURL = Self.kokoroServerScriptURL,
+                      FileManager.default.fileExists(atPath: Self.kokoroPythonURL.path) {
+                proc.executableURL = Self.kokoroPythonURL
+                proc.arguments = [scriptURL.path] + commonArgs
+            } else {
+                return false
+            }
+
             proc.standardOutput = FileHandle.nullDevice
             proc.standardError = FileHandle.nullDevice
             do {

@@ -276,8 +276,10 @@ private struct GeneralSettingsTab: View {
                         Image(systemName: vm.kokoroInstalled ? "checkmark.seal.fill" : "arrow.down.circle")
                             .foregroundColor(vm.kokoroInstalled ? .green : .orange)
                         Text(vm.kokoroInstalled
-                             ? "Kokoro-82M установлен и работает локально офлайн"
-                             : "Kokoro не установлен — сейчас используется системный голос. Запустите scripts/setup_kokoro_tts.sh")
+                             ? (SpeechHelper.isUsingRustBackend
+                                ? "Kokoro-82M готов (нативный Rust-движок — без Python, автовыгрузка 10 мин)"
+                                : "Kokoro-82M установлен и работает локально офлайн")
+                             : "Файлы модели Kokoro не скачаны — запустите scripts/setup_kokoro_tts.sh")
                             .font(.system(size: 11.5))
                             .foregroundColor(.secondary)
                         Spacer()
