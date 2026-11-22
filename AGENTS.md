@@ -26,9 +26,9 @@ ollama-translator/
 ├── .gitignore                       # Ignores .build/, dist/, .DS_Store, etc.
 ├── scripts/
 │   ├── build_app.sh                 # Release build, icon generation, .app bundling (incl. kokoro_tts_server.py), ad-hoc codesign
-│   ├── kokoro_tts_server.py         # Lightweight local HTTP TTS server (127.0.0.1:18421) for Kokoro-82M neural voices
+│   ├── kokoro_tts_server.py         # Lightweight local HTTP TTS server (127.0.0.1:18421) with 10m idle-shutdown, parent-PID watchdog, and /shutdown
 │   ├── setup_kokoro_tts.sh          # One-command installer for Kokoro-82M venv + v1.0 ONNX model & voices
-│   └── test_logic.swift             # Standalone unit test runner (38+ assertions)
+│   └── test_logic.swift             # Standalone unit test runner (45+ assertions)
 └── Sources/OllamaTranslator/
     ├── main.swift                   # NSApplication bootstrap (.accessory policy, MainActor.assumeIsolated)
     ├── AppDelegate.swift            # Menu bar (NSStatusItem), Ollama health check, workflow orchestration, window lifecycle

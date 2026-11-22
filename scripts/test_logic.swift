@@ -126,6 +126,34 @@ struct TestRunner {
         ])
         assertEqual(tsv, "Heads-up\tПредупреждение\tLine 1<br>Line 2", "Anki TSV export escapes newlines cleanly")
 
+        // 7. Phrase extractor JSON parsing (including markdown fence handling)
+        let rawPhrases = """
+        ```json
+        [
+          {"english": "hop on a quick call", "russian": "созвониться ненадолго", "note": "разговорно-деловой стиль"},
+          {"english": "touch base", "russian": "связаться для сверки", "note": "короткий чек-ин"}
+        ]
+        ```
+        """
+        let extracted = client.parseExtractedPhrases(from: rawPhrases)
+        assertEqual(extracted.count, 2, "Extracted phrases count")
+        assertEqual(extracted[0].english, "hop on a quick call", "First extracted phrase english")
+        assertEqual(extracted[1].russian, "связаться для сверки", "Second extracted phrase russian")
+
+        // 8. Roleplay response parser (COACH / BETTER / CLIENT)
+        let rpRaw = """
+        COACH: Отличный ответ, но лучше чуть мягче.
+        BETTER: Could we push the release to Thursday so we can finish QA?
+        CLIENT: Thursday works for us! Thanks for the heads-up.
+        """
+        let parsedRP = client.parseRoleplayResponse(rpRaw)
+        assertEqual(parsedRP.coachNote, "Отличный ответ, но лучше чуть мягче.", "Roleplay coach note parsed")
+        assertEqual(parsedRP.betterPhrase, "Could we push the release to Thursday so we can finish QA?", "Roleplay better phrase parsed")
+        assertEqual(parsedRP.clientReply, "Thursday works for us! Thanks for the heads-up.", "Roleplay client reply parsed")
+
+        let rpNone = client.parseRoleplayResponse("COACH: Идеально!\nBETTER: NONE\nCLIENT: Sounds great!")
+        assertEqual(rpNone.betterPhrase, nil, "Roleplay BETTER: NONE parses as nil")
+
         print("All logic assertions passed!")
     }
 }

@@ -7,11 +7,16 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
 
     private let synthesizer = AVSpeechSynthesizer()
     private var audioPlayer: AVAudioPlayer?
-    private var lastSpokenText: String?
+    private var lastSpokenKey: String?
     private var activeSpeakTask: Task<Void, Never>?
     private var kokoroProcess: Process?
 
+    // In-memory LRU audio cache (last 20 clips) so repeating a flashcard is 0ms & 0% CPU
+    private var audioCache: [(key: String, data: Data)] = []
+    private let maxCacheItems = 20
+
     private let kokoroPort = 18421
+    private let kokoroIdleTimeoutSec = 600 // Auto-unload Kokoro after 10 min idle
     private var kokoroBaseURL: String { "http://127.0.0.1:\(kokoroPort)" }
 
     private override init() {
@@ -40,7 +45,6 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         if let bundled = Bundle.main.url(forResource: "kokoro_tts_server", withExtension: "py") {
             return bundled
         }
-        // Fallback for running binary directly from project workspace
         let fallback = URL(fileURLWithPath: "/Users/dmitry/Projects/ollama-translator/scripts/kokoro_tts_server.py")
         if FileManager.default.fileExists(atPath: fallback.path) {
             return fallback
@@ -68,33 +72,36 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     }
 
     /// Speaks English text aloud using Kokoro-82M (if enabled & installed) or macOS AVSpeechSynthesizer.
-    /// Calling again with the same text while playing stops playback.
-    func speakEnglish(_ text: String) {
+    /// Pass `speedOverride` (e.g. 0.75) for slow listening practice.
+    func speakEnglish(_ text: String, speedOverride: Double? = nil) {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
 
-        if isSpeaking && lastSpokenText == cleaned {
+        let cfg = ConfigStore.shared.config
+        let effectiveSpeed = speedOverride ?? cfg.ttsSpeed
+        let toggleKey = String(format: "%.2f|%@", effectiveSpeed, cleaned)
+
+        if isSpeaking && lastSpokenKey == toggleKey {
             stop()
             return
         }
 
         stop()
-        lastSpokenText = cleaned
+        lastSpokenKey = toggleKey
 
-        let cfg = ConfigStore.shared.config
         if cfg.ttsEngine == .kokoro && Self.isKokoroInstalled {
             activeSpeakTask = Task { [weak self] in
                 guard let self = self else { return }
                 let ok = await self.speakWithKokoro(
                     text: cleaned,
                     voice: cfg.kokoroVoice,
-                    speed: cfg.ttsSpeed
+                    speed: effectiveSpeed
                 )
                 if !ok && !Task.isCancelled {
                     self.speakWithSystem(
                         text: cleaned,
                         voiceID: cfg.systemVoiceIdentifier,
-                        speed: cfg.ttsSpeed
+                        speed: effectiveSpeed
                     )
                 }
             }
@@ -102,7 +109,7 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
             speakWithSystem(
                 text: cleaned,
                 voiceID: cfg.systemVoiceIdentifier,
-                speed: cfg.ttsSpeed
+                speed: effectiveSpeed
             )
         }
     }
@@ -117,20 +124,61 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        lastSpokenText = nil
+        lastSpokenKey = nil
     }
 
-    func shutdownDaemon() {
+    /// Immediately stops Kokoro daemon & clears cached audio to free RAM.
+    func unloadKokoro() async {
         stop()
+        audioCache.removeAll()
+
+        if let url = URL(string: "\(kokoroBaseURL)/shutdown") {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.timeoutInterval = 1.0
+            _ = try? await URLSession.shared.data(for: req)
+        }
+
         if let proc = kokoroProcess, proc.isRunning {
             proc.terminate()
         }
         kokoroProcess = nil
     }
 
+    func shutdownDaemon() {
+        stop()
+        audioCache.removeAll()
+        if let proc = kokoroProcess, proc.isRunning {
+            proc.terminate()
+        }
+        kokoroProcess = nil
+    }
+
+    // MARK: - LRU Audio Cache
+
+    private func cachedAudio(for key: String) -> Data? {
+        guard let idx = audioCache.firstIndex(where: { $0.key == key }) else { return nil }
+        let item = audioCache.remove(at: idx)
+        audioCache.append(item)
+        return item.data
+    }
+
+    private func storeCachedAudio(_ data: Data, for key: String) {
+        audioCache.removeAll { $0.key == key }
+        audioCache.append((key: key, data: data))
+        if audioCache.count > maxCacheItems {
+            audioCache.removeFirst(audioCache.count - maxCacheItems)
+        }
+    }
+
     // MARK: - Kokoro Local Neural TTS
 
     private func speakWithKokoro(text: String, voice: String, speed: Double) async -> Bool {
+        let cacheKey = String(format: "%@|%.2f|%@", voice, speed, text)
+        if let cached = cachedAudio(for: cacheKey) {
+            return playWAVData(cached)
+        }
+
         guard await ensureKokoroServerRunning() else { return false }
         guard !Task.isCancelled else { return false }
 
@@ -154,6 +202,15 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
                 return false
             }
 
+            storeCachedAudio(data, for: cacheKey)
+            return playWAVData(data)
+        } catch {
+            return false
+        }
+    }
+
+    private func playWAVData(_ data: Data) -> Bool {
+        do {
             let player = try AVAudioPlayer(data: data)
             player.delegate = self
             player.prepareToPlay()
@@ -177,7 +234,9 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
             proc.arguments = [
                 scriptURL.path,
                 "--port", String(kokoroPort),
-                "--model-dir", Self.kokoroModelDir.path
+                "--model-dir", Self.kokoroModelDir.path,
+                "--idle-timeout", String(kokoroIdleTimeoutSec),
+                "--parent-pid", String(ProcessInfo.processInfo.processIdentifier)
             ]
             proc.standardOutput = FileHandle.nullDevice
             proc.standardError = FileHandle.nullDevice
@@ -189,7 +248,6 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
             }
         }
 
-        // Wait up to ~8 seconds on cold start while ONNX model loads into RAM
         for _ in 0..<40 {
             if Task.isCancelled { return false }
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -217,7 +275,7 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     private func speakWithSystem(text: String, voiceID: String, speed: Double) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = preferredEnglishSystemVoice(preferredID: voiceID)
-        let scaled = Float(Double(AVSpeechUtteranceDefaultSpeechRate) * max(0.75, min(1.25, speed)))
+        let scaled = Float(Double(AVSpeechUtteranceDefaultSpeechRate) * max(0.7, min(1.25, speed)))
         utterance.rate = scaled
         utterance.pitchMultiplier = 1.0
         synthesizer.speak(utterance)
@@ -240,14 +298,14 @@ final class SpeechHelper: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
-            self.lastSpokenText = nil
+            self.lastSpokenKey = nil
         }
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
             self.audioPlayer = nil
-            self.lastSpokenText = nil
+            self.lastSpokenKey = nil
         }
     }
 }

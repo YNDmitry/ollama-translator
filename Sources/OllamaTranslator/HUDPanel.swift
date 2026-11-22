@@ -35,12 +35,15 @@ final class HUDViewModel: ObservableObject {
     @Published var quickGlossMode: GlossaryMatchMode = .promptHint
     @Published var quickGlossSavedNotice: Bool = false
 
-    // Inline AI English Coach ("Разбор фразы")
+    // Inline AI English Coach ("Разбор фразы") + Phrase Extractor
     @Published var showExplanation: Bool = false
     @Published var explanationText: String = ""
     @Published var isExplaining: Bool = false
     @Published var explanationError: String? = nil
     @Published var isSavedToVocab: Bool = false
+    @Published var extractedPhrases: [ExtractedPhrase] = []
+    @Published var isExtractingPhrases: Bool = false
+    @Published var savedExtractedIDs: Set<UUID> = []
 
     var onCopy: ((String) -> Void)?
     var onReplace: ((String) -> Void)?
@@ -49,6 +52,8 @@ final class HUDViewModel: ObservableObject {
     var onPolishResult: (() -> Void)?
     var onSpeakEnglish: ((String) -> Void)?
     var onExplainPhrase: (() -> Void)?
+    var onExtractPhrases: (() -> Void)?
+    var onSaveExtractedPhrase: ((ExtractedPhrase) -> Void)?
     var onSaveToVocab: (() -> Void)?
     var onSendReply: ((String) -> Void)?
     var onPasteReply: ((String) -> Void)?
@@ -78,6 +83,9 @@ final class HUDViewModel: ObservableObject {
         explanationText = ""
         isExplaining = false
         explanationError = nil
+        extractedPhrases = []
+        isExtractingPhrases = false
+        savedExtractedIDs = []
     }
 }
 
@@ -124,6 +132,14 @@ final class HUDController {
     var onExplainPhrase: (() -> Void)? {
         get { viewModel.onExplainPhrase }
         set { viewModel.onExplainPhrase = newValue }
+    }
+    var onExtractPhrases: (() -> Void)? {
+        get { viewModel.onExtractPhrases }
+        set { viewModel.onExtractPhrases = newValue }
+    }
+    var onSaveExtractedPhrase: ((ExtractedPhrase) -> Void)? {
+        get { viewModel.onSaveExtractedPhrase }
+        set { viewModel.onSaveExtractedPhrase = newValue }
     }
     var onSaveToVocab: (() -> Void)? {
         get { viewModel.onSaveToVocab }
@@ -277,7 +293,9 @@ final class HUDController {
 
         var height: CGFloat = CGFloat(170 + estimatedLines * 20)
         if viewModel.showOriginal { height += 90 }
-        if viewModel.showExplanation { height += 195 }
+        if viewModel.showExplanation {
+            height += viewModel.extractedPhrases.isEmpty ? 205 : 300
+        }
         if viewModel.showQuickGlossary { height += 72 }
         if viewModel.showReplyBox {
             height += viewModel.replyOutput.isEmpty ? 84 : 195
@@ -613,6 +631,23 @@ private struct HUDRootView: View {
                         }
                         Spacer()
                         Button {
+                            vm.onExtractPhrases?()
+                        } label: {
+                            HStack(spacing: 3) {
+                                if vm.isExtractingPhrases {
+                                    ProgressView().controlSize(.mini)
+                                } else {
+                                    Image(systemName: "text.badge.plus")
+                                }
+                                Text("Вытащить в карточки")
+                            }
+                            .font(.system(size: 10.5))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(vm.isExtractingPhrases || vm.englishTextForSpeech.isEmpty)
+
+                        Button {
                             vm.explanationText = ""
                             vm.onExplainPhrase?()
                         } label: {
@@ -639,8 +674,47 @@ private struct HUDRootView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(8)
                         }
-                        .frame(minHeight: 80, maxHeight: 190)
+                        .frame(minHeight: 80, maxHeight: 170)
                         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    if !vm.extractedPhrases.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(vm.extractedPhrases) { phrase in
+                                let saved = vm.savedExtractedIDs.contains(phrase.id)
+                                HStack(spacing: 6) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(phrase.english)
+                                            .font(.system(size: 11.5, weight: .semibold))
+                                        Text(phrase.russian)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Button {
+                                        vm.onSpeakEnglish?(phrase.english)
+                                    } label: {
+                                        Image(systemName: "speaker.wave.2")
+                                            .font(.system(size: 10.5))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        vm.onSaveExtractedPhrase?(phrase)
+                                    } label: {
+                                        Label(saved ? "Сохранено" : "Учить", systemImage: saved ? "checkmark" : "plus")
+                                            .font(.system(size: 10.5))
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                    .disabled(saved)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                            }
+                        }
                     }
                 }
             }

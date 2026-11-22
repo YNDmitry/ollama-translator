@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentTask: Task<Void, Never>?
     private var replyTask: Task<Void, Never>?
     private var explainTask: Task<Void, Never>?
+    private var extractTask: Task<Void, Never>?
     private var lastPopupResult: TranslationResult?
     private var lastTargetApp: NSRunningApplication?
     private var pendingClipboardSnapshot: PasteboardSnapshot?
@@ -224,7 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.hud.viewModel.isExplaining = true
             self.isTranslating = true
 
-            self.explainTask = Task { @MainActor in
+            self.explainTask = Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 do {
                     let explanation = try await self.ollamaClient.explainPhraseStream(
                         originalText: orig,
@@ -250,6 +252,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.isTranslating = false
                 }
             }
+        }
+
+        hud.onExtractPhrases = { [weak self] in
+            guard let self = self else { return }
+            let english = self.hud.viewModel.englishTextForSpeech
+            guard !english.isEmpty else { return }
+
+            self.extractTask?.cancel()
+            self.hud.viewModel.isExtractingPhrases = true
+            self.hud.viewModel.extractedPhrases = []
+            self.hud.viewModel.savedExtractedIDs = []
+            let cfg = self.configStore.config
+
+            self.extractTask = Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                do {
+                    let items = try await self.ollamaClient.extractUsefulPhrases(englishText: english, config: cfg)
+                    guard !Task.isCancelled else { return }
+                    self.hud.viewModel.extractedPhrases = items
+                    self.hud.viewModel.isExtractingPhrases = false
+                    self.hud.viewModel.onLayoutChanged?()
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    self.hud.viewModel.isExtractingPhrases = false
+                }
+            }
+        }
+
+        hud.onSaveExtractedPhrase = { [weak self] phrase in
+            guard let self = self else { return }
+            self.vocabStore.addCard(english: phrase.english, russian: phrase.russian, note: phrase.note)
+            self.hud.viewModel.savedExtractedIDs.insert(phrase.id)
+            self.flashcardsViewModel?.refreshQueue()
         }
 
         hud.onSendReply = { [weak self] russianReply in
@@ -314,11 +349,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.currentTask?.cancel()
             self.replyTask?.cancel()
             self.explainTask?.cancel()
+            self.extractTask?.cancel()
             SpeechHelper.shared.stop()
             self.isTranslating = false
             self.hud.viewModel.isStreaming = false
             self.hud.viewModel.isGeneratingReply = false
             self.hud.viewModel.isExplaining = false
+            self.hud.viewModel.isExtractingPhrases = false
             if let saved = self.pendingClipboardSnapshot {
                 TextAutomation.restorePasteboard(saved)
                 self.pendingClipboardSnapshot = nil
@@ -464,10 +501,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         historyMenuItem.submenu = historySubmenu
         menu.addItem(historyMenuItem)
 
-        // Warmup model
+        // Warmup & Unload memory controls
         let warmupItem = NSMenuItem(title: "Прогреть модель в памяти", action: #selector(menuWarmupModel), keyEquivalent: "")
         warmupItem.target = self
         menu.addItem(warmupItem)
+
+        let unloadItem = NSMenuItem(title: "Выгрузить модели (освободить RAM)", action: #selector(menuUnloadModels), keyEquivalent: "")
+        unloadItem.target = self
+        menu.addItem(unloadItem)
 
         menu.addItem(.separator())
 
@@ -573,6 +614,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 isTranslating = false
                 hud.showToast(icon: "exclamationmark.triangle.fill", isError: true, message: error.localizedDescription, duration: 3.0)
             }
+        }
+    }
+
+    @objc private func menuUnloadModels() {
+        Task { @MainActor in
+            await ollamaClient.unloadModel(config: configStore.config)
+            await SpeechHelper.shared.unloadKokoro()
+            hud.showToast(icon: "memorychip", message: "Ollama и Kokoro выгружены — RAM освобождена", duration: 1.8)
         }
     }
 

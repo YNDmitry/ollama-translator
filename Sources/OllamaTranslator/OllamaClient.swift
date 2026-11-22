@@ -108,6 +108,25 @@ final class OllamaClient {
         }
     }
 
+    /// Immediately evicts the model from Ollama RAM/VRAM (`keep_alive: 0`).
+    func unloadModel(config: AppConfig) async {
+        guard let url = URL(string: normalizedBaseURL(config.ollamaBaseURL) + "/api/chat") else {
+            return
+        }
+
+        let payload: [String: Any] = [
+            "model": config.modelName,
+            "messages": [],
+            "keep_alive": 0
+        ]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 4
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        _ = try? await session.data(for: request)
+    }
+
     /// Standard non-streaming translation (ideal for in-place replacement).
     func translate(
         text: String,
@@ -343,6 +362,216 @@ final class OllamaClient {
         let cleaned = cleanModelOutput(raw, originalCore: attempt)
         guard !cleaned.isEmpty else { throw OllamaError.emptyResponse }
         return cleaned
+    }
+
+    /// Evaluates a user's dictation/listening attempt against the spoken English phrase.
+    func evaluateListeningAttemptStream(
+        spokenEnglish: String,
+        russianMeaning: String,
+        userInput: String,
+        config: AppConfig,
+        onPartial: (@Sendable (String) -> Void)?
+    ) async throws -> String {
+        let attempt = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !attempt.isEmpty else { throw OllamaError.emptyResponse }
+
+        let systemPrompt = """
+        Ты преподаватель английского. Пользователь тренировал аудирование (слушал английскую фразу без текста) и написал то, что услышал (на английском или перевод на русском).
+        Оцени результат строго НА РУССКОМ языке (максимум 70–90 слов).
+        Формат:
+        • Первая строка: `✅ Точно услышано!`, `🟡 Почти точно` или `🔴 Есть пропуски`.
+        • 1–2 коротких пункта: какие слова/артикли/сокращения были пропущены или услышаны неточно, и на что обратить внимание на слух.
+        """
+
+        let userPrompt = """
+        Произнесённая фраза (EN): \(spokenEnglish)
+        Смысл (RU): \(russianMeaning)
+        Ответ пользователя: \(attempt)
+        """
+
+        let raw = try await streamChat(
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            config: config,
+            temperature: 0.2
+        ) { accumulated in
+            if let cb = onPartial {
+                let live = self.cleanStreamingPreview(accumulated, originalCore: attempt)
+                if !live.isEmpty {
+                    cb(live)
+                }
+            }
+        }
+
+        let cleaned = cleanModelOutput(raw, originalCore: attempt)
+        guard !cleaned.isEmpty else { throw OllamaError.emptyResponse }
+        return cleaned
+    }
+
+    /// Extracts 2–3 reusable business/conversational English phrases for SRS flashcards.
+    func extractUsefulPhrases(englishText: String, config: AppConfig) async throws -> [ExtractedPhrase] {
+        let core = englishText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !core.isEmpty else { return [] }
+
+        let systemPrompt = """
+        You extract 2 to 3 most useful, reusable English expressions (phrasal verbs, collocations, idioms, or polite client phrases) from the user's English text for a Russian speaker learning English.
+        Output ONLY a valid JSON array of objects, with no markdown and no extra text:
+        [{"english":"short reusable phrase","russian":"естественный русский перевод","note":"краткий оттенок смысла (3-8 слов)"}]
+        Keep each "english" item concise (2 to 6 words) so it makes a great flashcard.
+        """
+
+        let raw = try await streamChat(
+            systemPrompt: systemPrompt,
+            userPrompt: core,
+            config: config,
+            temperature: 0.2
+        ) { _ in }
+
+        let cleaned = cleanModelOutput(raw, originalCore: core)
+        return parseExtractedPhrases(from: cleaned)
+    }
+
+    func parseExtractedPhrases(from raw: String) -> [ExtractedPhrase] {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let start = text.firstIndex(of: "["), let end = text.lastIndex(of: "]"), start < end {
+            text = String(text[start...end])
+        }
+
+        struct RawItem: Decodable {
+            let english: String?
+            let russian: String?
+            let note: String?
+        }
+
+        guard let data = text.data(using: .utf8),
+              let items = try? JSONDecoder().decode([RawItem].self, from: data) else {
+            return []
+        }
+
+        return items.compactMap { item in
+            let en = (item.english ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let ru = (item.russian ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let nt = (item.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !en.isEmpty, !ru.isEmpty else { return nil }
+            return ExtractedPhrase(english: en, russian: ru, note: nt)
+        }
+    }
+
+    /// Runs one turn of interactive Client Chat Roleplay: returns coach feedback in Russian + client's next reply in English.
+    func roleplayTurn(
+        scenario: RoleplayScenario,
+        history: [RoleplayMessage],
+        userMessage: String,
+        config: AppConfig
+    ) async throws -> (coachNote: String, betterPhrase: String?, clientReply: String) {
+        guard let url = URL(string: normalizedBaseURL(config.ollamaBaseURL) + "/api/chat") else {
+            throw OllamaError.invalidURL
+        }
+
+        let systemPrompt = """
+        \(scenario.clientPersona)
+        You have TWO roles in every response:
+        1. Briefly coach the user's latest English message in RUSSIAN (1-2 short sentences: praise if natural, or gently fix grammar/tone).
+        2. Reply in character as the English-speaking client (1-3 natural conversational sentences) to keep the work chat going.
+
+        Output STRICTLY in this exact format (no extra headers or markdown):
+        COACH: <краткий комментарий на русском к последнему сообщению пользователя>
+        BETTER: <optional more natural English version of the user's message, or NONE if already great>
+        CLIENT: <natural English reply from the client>
+        """
+
+        var messages: [[String: String]] = [["role": "system", "content": systemPrompt]]
+        for msg in history.suffix(8) {
+            messages.append([
+                "role": msg.isUser ? "user" : "assistant",
+                "content": msg.isUser ? msg.text : "CLIENT: \(msg.text)"
+            ])
+        }
+        messages.append(["role": "user", "content": userMessage])
+
+        var payload: [String: Any] = [
+            "model": config.modelName,
+            "messages": messages,
+            "stream": false,
+            "keep_alive": config.keepAlive,
+            "options": [
+                "temperature": 0.45,
+                "top_p": 0.9
+            ]
+        ]
+        if config.disableThinking {
+            payload["think"] = false
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            throw OllamaError.cancelled
+        } catch {
+            throw OllamaError.connectionFailed(error.localizedDescription)
+        }
+
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw OllamaError.httpError(http.statusCode, body)
+        }
+
+        struct ChatResp: Decodable {
+            struct Msg: Decodable { let content: String? }
+            let message: Msg?
+        }
+        let decoded = try JSONDecoder().decode(ChatResp.self, from: data)
+        let raw = cleanModelOutput(decoded.message?.content ?? "", originalCore: userMessage)
+        guard !raw.isEmpty else { throw OllamaError.emptyResponse }
+        return parseRoleplayResponse(raw)
+    }
+
+    func parseRoleplayResponse(_ raw: String) -> (coachNote: String, betterPhrase: String?, clientReply: String) {
+        var coach = ""
+        var better: String? = nil
+        var client = ""
+
+        var currentSection = ""
+        for rawLine in raw.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.uppercased().hasPrefix("COACH:") {
+                currentSection = "COACH"
+                coach = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            } else if line.uppercased().hasPrefix("BETTER:") {
+                currentSection = "BETTER"
+                let val = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                if !val.isEmpty && val.uppercased() != "NONE" && val != "-" {
+                    better = val
+                }
+            } else if line.uppercased().hasPrefix("CLIENT:") {
+                currentSection = "CLIENT"
+                client = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+            } else if !line.isEmpty {
+                switch currentSection {
+                case "COACH": coach += (coach.isEmpty ? "" : " ") + line
+                case "BETTER":
+                    if let b = better { better = b + " " + line }
+                case "CLIENT": client += (client.isEmpty ? "" : "\n") + line
+                default:
+                    client += (client.isEmpty ? "" : "\n") + line
+                }
+            }
+        }
+
+        if client.isEmpty {
+            client = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if coach.isEmpty {
+            coach = "Хороший ответ!"
+        }
+        return (coach, better, client)
     }
 
     private func streamChat(
