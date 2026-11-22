@@ -38,9 +38,11 @@ All shortcuts can be customized in **Settings → Hotkeys**.
 - **Real-time streaming**: words appear within ~0.2s in the floating popup (`⌃⌥P`) and Quick Translator (`⌃⌥G`).
 - **Context-aware client replies**: highlight an incoming client message → press `⌃⌥P` → click **Reply**, type your answer in Russian, and hit `Enter`. The model uses the client's message as context to produce a natural English reply ready to copy or paste straight into the chat.
 - **Active English Learning Suite**:
-  - **AI English Coach (`🎓`)** — get a concise Russian breakdown of key vocabulary, phrasal verbs, grammar improvements, and tone nuances right inside the popup or Quick Translator.
-  - **Lifelike Local Pronunciation (`🔊`)** — supports **Kokoro-82M** neural offline English voices (US & UK, ~200ms latency on Apple Silicon) with automatic fallback to macOS native speech synthesis. Run `./scripts/setup_kokoro_tts.sh` once to enable studio-quality Kokoro voices.
-  - **Spaced-Repetition Flashcards (`⌃⌥L`)** — bookmark real phrases (`★`) from popups or translation history, practice `RU → EN` / `EN → RU` with SM-2-lite scheduling, type your own English translation for instant AI grading, track your daily streak (`🔥`), and export your deck to **Anki (`.tsv`)**.
+  - **AI English Coach (`🎓`) & Phrase Extractor** — get a concise Russian breakdown of key vocabulary/grammar, plus 1-click **Extract Phrases** to pull 2–3 reusable idioms/phrasal verbs straight into your flashcard deck.
+  - **Lifelike Local Pronunciation (`🔊`)** — supports **Kokoro-82M** neural offline English voices (US & UK, ~200ms latency on Apple Silicon) with in-memory audio caching, automatic idle shutdown (10 min) to free RAM, parent-PID watchdog, and fallback to macOS native speech synthesis. Run `./scripts/setup_kokoro_tts.sh` once to enable Kokoro.
+  - **Spaced-Repetition Flashcards & Listening Trainer (`⌃⌥L`)** — bookmark real phrases (`🔖`), practice `RU → EN`, `EN → RU`, or **🎧 Listening / Dictation** (hidden text + `🐢 0.75x` slow replay), type your answer for instant AI grading, track your daily streak (`🔥`), and export to **Anki (`.tsv`)**.
+  - **Client Chat Roleplay Simulator (`💬`)** — practice realistic 3-minute client chats (*Deadline shift*, *Scope & pricing*, *Production bug*, *Clarifying specs*, *Weekly update*) with Kokoro voice playback and gentle Russian coaching after every message.
+- **Memory-friendly**: 0% idle CPU, automatic Ollama (`keep_alive`) & Kokoro (`10m` idle) unloading, plus a 1-click **Unload Models (Free RAM)** action in the menu bar.
 - **Custom Glossary / Word Replacements**: define preferred translations or strict substitutions per word/phrase — either from Settings or inline right inside the popup:
   - *AI Hint* — injected into the system prompt so the term is inflected naturally in context.
   - *Exact Replace* — enforces strict post-translation replacement while preserving capitalization and word boundaries.

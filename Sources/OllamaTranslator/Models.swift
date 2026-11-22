@@ -263,6 +263,72 @@ struct VocabDatabase: Codable, Equatable {
     var stats: VocabStats = VocabStats()
 }
 
+struct ExtractedPhrase: Codable, Identifiable, Equatable {
+    var id: UUID = UUID()
+    var english: String
+    var russian: String
+    var note: String = ""
+}
+
+enum RoleplayScenario: String, CaseIterable, Identifiable {
+    case deadlineShift
+    case scopeAndPricing
+    case productionBug
+    case clarifySpecs
+    case weeklyUpdate
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .deadlineShift: return "Перенос дедлайна"
+        case .scopeAndPricing: return "Цена и доработки"
+        case .productionBug: return "Баг на проде"
+        case .clarifySpecs: return "Уточнение ТЗ"
+        case .weeklyUpdate: return "Статус-апдейт"
+        }
+    }
+
+    var clientPersona: String {
+        switch self {
+        case .deadlineShift:
+            return "You are Alex, a friendly but busy SaaS product manager asking if the feature will be ready for tomorrow's demo."
+        case .scopeAndPricing:
+            return "You are Sarah, a startup founder asking to add an extra analytics dashboard to the current sprint without mentioning extra budget."
+        case .productionBug:
+            return "You are Mike, an enterprise client who just noticed checkout emails aren't arriving in production and wants a quick update."
+        case .clarifySpecs:
+            return "You are Emma, a client who sent a high-level feature request and needs to clarify user roles and edge cases."
+        case .weeklyUpdate:
+            return "You are David, a client checking in on Friday for a quick weekly progress update and next week's priorities."
+        }
+    }
+
+    var openingClientMessage: String {
+        switch self {
+        case .deadlineShift:
+            return "Hey! Quick check-in — are we still on track to ship the new dashboard before tomorrow's demo?"
+        case .scopeAndPricing:
+            return "Hi there! Love the latest build. By the way, could we also squeeze in a CSV export and team analytics page before Friday?"
+        case .productionBug:
+            return "Hey, sorry to ping you urgently, but a couple of our users mentioned they aren't receiving password reset emails right now. Any idea what's going on?"
+        case .clarifySpecs:
+            return "Thanks for kicking off the integration! Let me know if anything in the spec looks unclear before you dive too deep."
+        case .weeklyUpdate:
+            return "Happy Friday! How did things go this week, and what's next on our radar for Monday?"
+        }
+    }
+}
+
+struct RoleplayMessage: Identifiable, Equatable {
+    var id: UUID = UUID()
+    let isUser: Bool
+    let text: String
+    var coachNote: String? = nil
+    var betterPhrase: String? = nil
+    var russianHint: String? = nil
+}
+
 enum KeyCodeMapper {
     static func symbol(for keyCode: UInt32) -> String {
         switch Int(keyCode) {

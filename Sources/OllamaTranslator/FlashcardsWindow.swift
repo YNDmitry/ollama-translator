@@ -4,19 +4,22 @@ import UniformTypeIdentifiers
 
 enum FlashcardTab: Hashable {
     case practice
+    case roleplay
     case deck
 }
 
 enum PracticeDirection: String, CaseIterable, Identifiable {
     case ruToEn
     case enToRu
+    case listening
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .ruToEn: return "RU → EN (Активный)"
-        case .enToRu: return "EN → RU (Понимание)"
+        case .ruToEn: return "RU → EN"
+        case .enToRu: return "EN → RU"
+        case .listening: return "🎧 Аудирование"
         }
     }
 }
@@ -24,7 +27,13 @@ enum PracticeDirection: String, CaseIterable, Identifiable {
 @MainActor
 final class FlashcardsViewModel: ObservableObject {
     @Published var selectedTab: FlashcardTab = .practice
-    @Published var practiceDirection: PracticeDirection = .ruToEn
+    @Published var practiceDirection: PracticeDirection = .ruToEn {
+        didSet {
+            if practiceDirection == .listening, let card = currentCard, selectedTab == .practice {
+                SpeechHelper.shared.speakEnglish(card.english)
+            }
+        }
+    }
 
     // Practice session state
     @Published var sessionQueue: [UUID] = []
@@ -34,6 +43,14 @@ final class FlashcardsViewModel: ObservableObject {
     @Published var aiFeedback: String = ""
     @Published var isCheckingWithAI: Bool = false
     @Published var aiError: String? = nil
+
+    // Roleplay simulator state
+    @Published var selectedScenario: RoleplayScenario = .deadlineShift
+    @Published var roleplayMessages: [RoleplayMessage] = []
+    @Published var roleplayInput: String = ""
+    @Published var isRoleplayBusy: Bool = false
+    @Published var roleplayAutoSpeak: Bool = true
+    @Published var roleplayError: String? = nil
 
     // Deck management state
     @Published var searchQuery: String = ""
@@ -45,11 +62,13 @@ final class FlashcardsViewModel: ObservableObject {
     let vocabStore: VocabStore
     private let ollamaClient: OllamaClient
     private var checkTask: Task<Void, Never>?
+    private var roleplayTask: Task<Void, Never>?
 
     init(vocabStore: VocabStore, ollamaClient: OllamaClient) {
         self.vocabStore = vocabStore
         self.ollamaClient = ollamaClient
         refreshQueue()
+        startRoleplay(scenario: .deadlineShift, autoSpeakOpening: false)
     }
 
     var currentCard: VocabCard? {
@@ -70,6 +89,8 @@ final class FlashcardsViewModel: ObservableObject {
             $0.note.lowercased().contains(q)
         }
     }
+
+    // MARK: - Flashcards Practice
 
     func refreshQueue(includeAllAhead: Bool = false) {
         practiceAheadMode = includeAllAhead
@@ -99,11 +120,16 @@ final class FlashcardsViewModel: ObservableObject {
         if !sessionQueue.isEmpty {
             let ratedID = sessionQueue.removeFirst()
             if rating == .again {
-                // Re-insert near end of current session so user sees it again soon
                 sessionQueue.append(ratedID)
             }
         }
         resetCurrentCardUI()
+
+        if practiceDirection == .listening, let next = currentCard {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                SpeechHelper.shared.speakEnglish(next.english)
+            }
+        }
     }
 
     func checkAttemptWithAI() {
@@ -118,16 +144,32 @@ final class FlashcardsViewModel: ObservableObject {
         isAnswerRevealed = true
 
         let cfg = ConfigStore.shared.config
-        checkTask = Task {
+        let isListening = (practiceDirection == .listening)
+        checkTask = Task { [weak self] in
+            guard let self = self else { return }
             do {
-                let feedback = try await ollamaClient.evaluatePracticeAttemptStream(
-                    russianPrompt: card.russian,
-                    referenceEnglish: card.english,
-                    userEnglish: attempt,
-                    config: cfg
-                ) { [weak self] partial in
-                    Task { @MainActor in
-                        self?.aiFeedback = partial
+                let feedback: String
+                if isListening {
+                    feedback = try await self.ollamaClient.evaluateListeningAttemptStream(
+                        spokenEnglish: card.english,
+                        russianMeaning: card.russian,
+                        userInput: attempt,
+                        config: cfg
+                    ) { [weak self] partial in
+                        Task { @MainActor in
+                            self?.aiFeedback = partial
+                        }
+                    }
+                } else {
+                    feedback = try await self.ollamaClient.evaluatePracticeAttemptStream(
+                        russianPrompt: card.russian,
+                        referenceEnglish: card.english,
+                        userEnglish: attempt,
+                        config: cfg
+                    ) { [weak self] partial in
+                        Task { @MainActor in
+                            self?.aiFeedback = partial
+                        }
                     }
                 }
                 guard !Task.isCancelled else { return }
@@ -142,6 +184,93 @@ final class FlashcardsViewModel: ObservableObject {
             }
         }
     }
+
+    // MARK: - Client Chat Roleplay
+
+    func startRoleplay(scenario: RoleplayScenario, autoSpeakOpening: Bool = true) {
+        roleplayTask?.cancel()
+        SpeechHelper.shared.stop()
+        selectedScenario = scenario
+        roleplayInput = ""
+        roleplayError = nil
+        isRoleplayBusy = false
+
+        let opening = RoleplayMessage(isUser: false, text: scenario.openingClientMessage)
+        roleplayMessages = [opening]
+        if autoSpeakOpening && roleplayAutoSpeak {
+            SpeechHelper.shared.speakEnglish(opening.text)
+        }
+    }
+
+    func sendRoleplayMessage() {
+        let trimmed = roleplayInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isRoleplayBusy else { return }
+
+        let historySnapshot = roleplayMessages
+        let userMsg = RoleplayMessage(isUser: true, text: trimmed)
+        roleplayMessages.append(userMsg)
+        roleplayInput = ""
+        roleplayError = nil
+        isRoleplayBusy = true
+
+        let scenario = selectedScenario
+        let cfg = ConfigStore.shared.config
+
+        roleplayTask = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let turn = try await self.ollamaClient.roleplayTurn(
+                    scenario: scenario,
+                    history: historySnapshot,
+                    userMessage: trimmed,
+                    config: cfg
+                )
+                guard !Task.isCancelled else { return }
+
+                // Attach coach feedback to the user's message
+                if let idx = self.roleplayMessages.firstIndex(where: { $0.id == userMsg.id }) {
+                    self.roleplayMessages[idx].coachNote = turn.coachNote
+                    self.roleplayMessages[idx].betterPhrase = turn.betterPhrase
+                }
+
+                let clientMsg = RoleplayMessage(isUser: false, text: turn.clientReply)
+                self.roleplayMessages.append(clientMsg)
+                self.isRoleplayBusy = false
+
+                if self.roleplayAutoSpeak {
+                    SpeechHelper.shared.speakEnglish(clientMsg.text)
+                }
+            } catch OllamaError.cancelled {
+                self.isRoleplayBusy = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.roleplayError = error.localizedDescription
+                self.isRoleplayBusy = false
+            }
+        }
+    }
+
+    func translateClientMessageHint(id: UUID) {
+        guard let idx = roleplayMessages.firstIndex(where: { $0.id == id }) else { return }
+        if roleplayMessages[idx].russianHint != nil { return }
+
+        let eng = roleplayMessages[idx].text
+        let cfg = ConfigStore.shared.config
+        Task { [weak self] in
+            guard let self = self else { return }
+            if let res = try? await self.ollamaClient.translate(text: eng, config: cfg, directionOverride: .enToRu) {
+                if let currentIdx = self.roleplayMessages.firstIndex(where: { $0.id == id }) {
+                    self.roleplayMessages[currentIdx].russianHint = res.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+    }
+
+    func saveBetterPhraseToVocab(english: String, userOriginal: String) {
+        vocabStore.addCard(english: english, russian: "Более естественный вариант (вместо: \(userOriginal))", note: "Из диалога: \(selectedScenario.title)")
+    }
+
+    // MARK: - Deck Management
 
     func addNewCard() {
         let added = vocabStore.addCard(english: newEnglish, russian: newRussian, note: newNote)
@@ -201,10 +330,11 @@ struct FlashcardsRootView: View {
             HStack(spacing: 12) {
                 Picker("", selection: $vm.selectedTab) {
                     Text("Тренировка (\(vm.dueCount))").tag(FlashcardTab.practice)
+                    Text("💬 Диалог").tag(FlashcardTab.roleplay)
                     Text("Мой словарь (\(vocabStore.cards.count))").tag(FlashcardTab.deck)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 280)
+                .frame(width: 390)
 
                 Spacer()
 
@@ -223,15 +353,20 @@ struct FlashcardsRootView: View {
 
             Divider()
 
-            if vm.selectedTab == .practice {
+            switch vm.selectedTab {
+            case .practice:
                 practiceView()
-            } else {
+            case .roleplay:
+                roleplayView()
+            case .deck:
                 deckView()
             }
         }
         .padding(16)
-        .frame(minWidth: 620, idealWidth: 680, minHeight: 540, idealHeight: 640)
+        .frame(minWidth: 640, idealWidth: 700, minHeight: 560, idealHeight: 650)
     }
+
+    // MARK: - Tab 1: Practice (RU->EN, EN->RU, Listening)
 
     @ViewBuilder
     private func practiceView() -> some View {
@@ -243,11 +378,11 @@ struct FlashcardsRootView: View {
                     .foregroundColor(.accentColor.opacity(0.8))
                 Text("Словарь для изучения пока пуст")
                     .font(.title3.weight(.semibold))
-                Text("Сохраняйте полезные фразы кнопкой ★ прямо из всплывающего окна (⌃⌥P), истории переводов или добавьте стартовый набор фраз для общения с клиентами.")
+                Text("Сохраняйте полезные фразы кнопкой 🔖 из всплывающего окна (⌃⌥P), истории переводов или добавьте стартовый набор фраз для общения с клиентами.")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: 440)
                 HStack(spacing: 10) {
                     Button("Добавить 5 полезных фраз для клиентов") {
                         vocabStore.addStarterClientCards()
@@ -272,7 +407,7 @@ struct FlashcardsRootView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 310)
+                    .frame(width: 360)
 
                     Spacer()
 
@@ -281,33 +416,70 @@ struct FlashcardsRootView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Scrollable central area so AI feedback & long phrases NEVER get squeezed or cut off
                 ScrollView {
                     VStack(spacing: 12) {
-                        // Flashcard front
+                        // Card front
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(vm.practiceDirection == .ruToEn ? "Переведите на английский:" : "Что означает эта фраза?")
-                                    .font(.system(size: 11.5, weight: .semibold))
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                if vm.practiceDirection == .enToRu {
+                            if vm.practiceDirection == .listening {
+                                HStack {
+                                    Label("Прослушайте фразу на слух (текст скрыт)", systemImage: "headphones")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(.accentColor)
+                                    Spacer()
+                                }
+
+                                HStack(spacing: 10) {
                                     Button {
                                         SpeechHelper.shared.speakEnglish(card.english)
                                     } label: {
-                                        Label("Озвучить", systemImage: "speaker.wave.2")
-                                            .font(.system(size: 11.5))
+                                        Label("Прослушать", systemImage: "speaker.wave.2.fill")
+                                            .font(.system(size: 13, weight: .semibold))
+                                    }
+                                    .buttonStyle(.borderedProminent)
+
+                                    Button {
+                                        SpeechHelper.shared.speakEnglish(card.english, speedOverride: 0.75)
+                                    } label: {
+                                        Label("🐢 Медленно (0.75x)", systemImage: "tortoise.fill")
+                                            .font(.system(size: 12.5))
                                     }
                                     .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                            }
 
-                            Text(vm.practiceDirection == .ruToEn ? card.russian : card.english)
-                                .font(.system(size: 18, weight: .semibold))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                    Spacer()
+                                }
+                            } else {
+                                HStack {
+                                    Text(vm.practiceDirection == .ruToEn ? "Переведите на английский:" : "Что означает эта фраза?")
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    if vm.practiceDirection == .enToRu {
+                                        Button {
+                                            SpeechHelper.shared.speakEnglish(card.english)
+                                        } label: {
+                                            Label("Озвучить", systemImage: "speaker.wave.2")
+                                                .font(.system(size: 11.5))
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+
+                                        Button {
+                                            SpeechHelper.shared.speakEnglish(card.english, speedOverride: 0.75)
+                                        } label: {
+                                            Text("🐢 0.75x")
+                                                .font(.system(size: 11))
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    }
+                                }
+
+                                Text(vm.practiceDirection == .ruToEn ? card.russian : card.english)
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                         .padding(16)
                         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
@@ -316,15 +488,20 @@ struct FlashcardsRootView: View {
                                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                         )
 
-                        // Active typing + AI evaluation (in RU -> EN mode)
-                        if vm.practiceDirection == .ruToEn {
+                        // Active typing + AI evaluation (in RU -> EN and Listening modes)
+                        if vm.practiceDirection == .ruToEn || vm.practiceDirection == .listening {
                             HStack(spacing: 8) {
-                                TextField("Попробуйте написать свой вариант по-английски...", text: $vm.userAttempt)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 13.5))
-                                    .onSubmit {
-                                        vm.checkAttemptWithAI()
-                                    }
+                                TextField(
+                                    vm.practiceDirection == .listening
+                                        ? "Напишите услышанную английскую фразу (или перевод)..."
+                                        : "Попробуйте написать свой вариант по-английски...",
+                                    text: $vm.userAttempt
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 13.5))
+                                .onSubmit {
+                                    vm.checkAttemptWithAI()
+                                }
 
                                 Button {
                                     vm.checkAttemptWithAI()
@@ -343,7 +520,7 @@ struct FlashcardsRootView: View {
                             }
                         }
 
-                        // AI evaluation feedback box — expands fully, never truncated!
+                        // AI evaluation feedback box
                         if let err = vm.aiError {
                             Text(err)
                                 .font(.system(size: 12.5))
@@ -353,7 +530,7 @@ struct FlashcardsRootView: View {
                         } else if vm.isCheckingWithAI || !vm.aiFeedback.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 6) {
-                                    Label("Оценка ИИ", systemImage: "sparkles")
+                                    Label(vm.practiceDirection == .listening ? "Проверка аудирования" : "Оценка ИИ", systemImage: "sparkles")
                                         .font(.system(size: 11.5, weight: .semibold))
                                         .foregroundColor(.accentColor)
                                     if vm.isCheckingWithAI {
@@ -394,14 +571,38 @@ struct FlashcardsRootView: View {
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
+
+                                    Button {
+                                        SpeechHelper.shared.speakEnglish(card.english, speedOverride: 0.75)
+                                    } label: {
+                                        Text("🐢 0.75x")
+                                            .font(.system(size: 11))
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
                                 }
 
-                                Text(vm.practiceDirection == .ruToEn ? card.english : card.russian)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.accentColor)
-                                    .textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if vm.practiceDirection == .listening {
+                                    Text(card.english)
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.accentColor)
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    Text(card.russian)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.primary)
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                } else {
+                                    Text(vm.practiceDirection == .ruToEn ? card.english : card.russian)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.accentColor)
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
 
                                 if !card.note.isEmpty {
                                     Text("Заметка: \(card.note)")
@@ -501,10 +702,202 @@ struct FlashcardsRootView: View {
         }
     }
 
+    // MARK: - Tab 2: Client Chat Roleplay Simulator
+
+    @ViewBuilder
+    private func roleplayView() -> some View {
+        VStack(spacing: 10) {
+            // Scenario selector bar
+            HStack(spacing: 8) {
+                Picker("Сценарий:", selection: Binding(
+                    get: { vm.selectedScenario },
+                    set: { vm.startRoleplay(scenario: $0) }
+                )) {
+                    ForEach(RoleplayScenario.allCases) { sc in
+                        Text(sc.title).tag(sc)
+                    }
+                }
+                .frame(width: 240)
+
+                Toggle("Автоозвучка", isOn: $vm.roleplayAutoSpeak)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 12))
+
+                Spacer()
+
+                Button("Начать заново") {
+                    vm.startRoleplay(scenario: vm.selectedScenario)
+                }
+                .controlSize(.small)
+            }
+
+            // Chat messages
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(vm.roleplayMessages) { msg in
+                        if msg.isUser {
+                            VStack(alignment: .trailing, spacing: 5) {
+                                HStack {
+                                    Spacer(minLength: 60)
+                                    Text(msg.text)
+                                        .font(.system(size: 13.5))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 9)
+                                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
+                                        .textSelection(.enabled)
+                                }
+
+                                if let coach = msg.coachNote {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Label(coach, systemImage: "graduationcap.fill")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.primary)
+                                            .fixedSize(horizontal: false, vertical: true)
+
+                                        if let better = msg.betterPhrase {
+                                            HStack(spacing: 6) {
+                                                Text("💡 Естественнее: «\(better)»")
+                                                    .font(.system(size: 12, weight: .medium))
+                                                    .foregroundColor(.accentColor)
+                                                    .textSelection(.enabled)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                                Spacer()
+                                                Button {
+                                                    SpeechHelper.shared.speakEnglish(better)
+                                                } label: {
+                                                    Image(systemName: "speaker.wave.2")
+                                                        .font(.system(size: 11))
+                                                }
+                                                .buttonStyle(.plain)
+
+                                                Button {
+                                                    vm.saveBetterPhraseToVocab(english: better, userOriginal: msg.text)
+                                                } label: {
+                                                    Image(systemName: vocabStore.contains(english: better) ? "bookmark.fill" : "bookmark")
+                                                        .font(.system(size: 11))
+                                                        .foregroundColor(.orange)
+                                                }
+                                                .buttonStyle(.plain)
+                                                .help("Сохранить этот вариант в тренажёр")
+                                            }
+                                        }
+                                    }
+                                    .padding(10)
+                                    .frame(maxWidth: 520, alignment: .leading)
+                                    .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .strokeBorder(Color.orange.opacity(0.24), lineWidth: 1)
+                                    )
+                                }
+                            }
+                        } else {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 6) {
+                                        Text("Клиент")
+                                            .font(.system(size: 10.5, weight: .semibold))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Button {
+                                            SpeechHelper.shared.speakEnglish(msg.text)
+                                        } label: {
+                                            Image(systemName: "speaker.wave.2")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Озвучить реплику клиента")
+
+                                        Button {
+                                            SpeechHelper.shared.speakEnglish(msg.text, speedOverride: 0.75)
+                                        } label: {
+                                            Text("🐢")
+                                                .font(.system(size: 11))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Озвучить медленно (0.75x)")
+
+                                        Button("Перевод") {
+                                            vm.translateClientMessageHint(id: msg.id)
+                                        }
+                                        .font(.system(size: 10.5))
+                                        .buttonStyle(.plain)
+                                        .foregroundColor(.accentColor)
+                                    }
+
+                                    Text(msg.text)
+                                        .font(.system(size: 13.5))
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+
+                                    if let hint = msg.russianHint {
+                                        Divider()
+                                        Text(hint)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .padding(12)
+                                .frame(maxWidth: 500, alignment: .leading)
+                                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                                )
+                                Spacer(minLength: 40)
+                            }
+                        }
+                    }
+
+                    if vm.isRoleplayBusy {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Клиент печатает и коуч проверяет ответ...")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.leading, 4)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            if let err = vm.roleplayError {
+                Text(err)
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            HStack(spacing: 8) {
+                TextField("Ответьте клиенту по-английски...", text: $vm.roleplayInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13.5))
+                    .onSubmit {
+                        vm.sendRoleplayMessage()
+                    }
+
+                Button {
+                    vm.sendRoleplayMessage()
+                } label: {
+                    Label("Отправить", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(vm.isRoleplayBusy || vm.roleplayInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    // MARK: - Tab 3: Vocabulary Deck
+
     @ViewBuilder
     private func deckView() -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Add form
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     TextField("Английская фраза / слово", text: $vm.newEnglish)
@@ -524,7 +917,6 @@ struct FlashcardsRootView: View {
                 }
             }
 
-            // Search & actions
             HStack(spacing: 8) {
                 TextField("Поиск по словарю...", text: $vm.searchQuery)
                     .textFieldStyle(.roundedBorder)

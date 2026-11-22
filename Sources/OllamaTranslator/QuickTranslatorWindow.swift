@@ -12,13 +12,17 @@ final class QuickTranslatorViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var lastResolvedDirection: TranslationDirection = .ruToEn
 
-    // AI English Coach breakdown
+    // AI English Coach breakdown + Phrase Extractor
     @Published var explanationText: String = ""
     @Published var isExplaining: Bool = false
+    @Published var extractedPhrases: [ExtractedPhrase] = []
+    @Published var isExtractingPhrases: Bool = false
+    @Published var savedExtractedIDs: Set<UUID> = []
 
     private let client: OllamaClient
     private var activeTask: Task<Void, Never>?
     private var explainTask: Task<Void, Never>?
+    private var extractTask: Task<Void, Never>?
 
     init(client: OllamaClient) {
         self.client = client
@@ -31,11 +35,15 @@ final class QuickTranslatorViewModel: ObservableObject {
         let previousOutput = alternative ? outputText : nil
         activeTask?.cancel()
         explainTask?.cancel()
+        extractTask?.cancel()
         isTranslating = true
         isExplaining = false
+        isExtractingPhrases = false
         errorMessage = nil
         outputText = ""
         explanationText = ""
+        extractedPhrases = []
+        savedExtractedIDs = []
         statusText = alternative ? "Подбираю другой вариант..." : "Перевожу..."
 
         let cfg = ConfigStore.shared.config
@@ -102,6 +110,41 @@ final class QuickTranslatorViewModel: ObservableObject {
         }
         let added = VocabStore.shared.addCard(english: english, russian: russian)
         statusText = added ? "★ Сохранено в тренажёр английского" : "Фраза уже в тренажёре"
+    }
+
+    func extractPhrases() {
+        let english = (lastResolvedDirection == .enToRu) ? inputText : outputText
+        guard !english.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        extractTask?.cancel()
+        isExtractingPhrases = true
+        extractedPhrases = []
+        savedExtractedIDs = []
+        errorMessage = nil
+
+        let cfg = ConfigStore.shared.config
+        extractTask = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let items = try await self.client.extractUsefulPhrases(englishText: english, config: cfg)
+                guard !Task.isCancelled else { return }
+                self.extractedPhrases = items
+                self.isExtractingPhrases = false
+                if items.isEmpty {
+                    self.statusText = "Не удалось выделить отдельные фразы"
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.errorMessage = error.localizedDescription
+                self.isExtractingPhrases = false
+            }
+        }
+    }
+
+    func saveExtractedPhrase(_ phrase: ExtractedPhrase) {
+        VocabStore.shared.addCard(english: phrase.english, russian: phrase.russian, note: phrase.note)
+        savedExtractedIDs.insert(phrase.id)
+        statusText = "★ Фраза «\(phrase.english)» добавлена в тренажёр"
     }
 
     func explainPhrase() {
@@ -317,6 +360,24 @@ struct QuickTranslatorView: View {
                     .disabled(vm.outputText.isEmpty || vm.isTranslating || vm.isExplaining)
 
                     Button {
+                        vm.extractPhrases()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if vm.isExtractingPhrases {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "text.badge.plus")
+                            }
+                            Text("Фразы")
+                        }
+                        .font(.system(size: 11.5))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(vm.outputText.isEmpty || vm.isTranslating || vm.isExtractingPhrases)
+                    .help("Вытащить 2–3 полезных выражения в карточки")
+
+                    Button {
                         vm.saveToVocab()
                     } label: {
                         Label("Учить", systemImage: "bookmark")
@@ -370,6 +431,49 @@ struct QuickTranslatorView: View {
                         }
                         .frame(minHeight: 95, maxHeight: 200)
                         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .padding(.top, 4)
+                }
+
+                if !vm.extractedPhrases.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label("Полезные выражения для карточек", systemImage: "text.badge.plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.orange)
+
+                        ForEach(vm.extractedPhrases) { phrase in
+                            let saved = vm.savedExtractedIDs.contains(phrase.id)
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(phrase.english)
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                    Text("\(phrase.russian)\(phrase.note.isEmpty ? "" : " • \(phrase.note)")")
+                                        .font(.system(size: 11.5))
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    SpeechHelper.shared.speakEnglish(phrase.english)
+                                } label: {
+                                    Image(systemName: "speaker.wave.2")
+                                        .font(.system(size: 11.5))
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    vm.saveExtractedPhrase(phrase)
+                                } label: {
+                                    Label(saved ? "Сохранено" : "В тренажёр", systemImage: saved ? "checkmark" : "plus")
+                                        .font(.system(size: 11))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(saved)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                        }
                     }
                     .padding(.top, 4)
                 }
