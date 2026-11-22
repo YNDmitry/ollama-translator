@@ -243,6 +243,61 @@ final class OllamaClient {
         )
     }
 
+    /// Streams a concise Russian English-coach breakdown of vocabulary, grammar, and tone.
+    func explainPhraseStream(
+        originalText: String,
+        translatedText: String,
+        direction: TranslationDirection,
+        config: AppConfig,
+        onPartial: (@Sendable (String) -> Void)?
+    ) async throws -> String {
+        let orig = originalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trans = translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !orig.isEmpty, !trans.isEmpty else { throw OllamaError.emptyResponse }
+
+        let englishText = (direction == .enToRu) ? orig : trans
+        let systemPrompt: String
+        let userPrompt: String
+
+        if direction == .polishEn {
+            systemPrompt = """
+            Ты лаконичный преподаватель делового английского для русскоязычного специалиста.
+            Отвечай строго НА РУССКОМ языке. Максимум 90–120 слов, без воды и вступлений.
+            Формат ответа:
+            • Что улучшено: 2–3 коротких пункта (грамматика, артикли, естественность речи).
+            • Полезные фразы: 1–3 выражения из улучшенного варианта в формате `выражение — перевод`.
+            """
+            userPrompt = "Было: \(orig)\nСтало: \(trans)"
+        } else {
+            systemPrompt = """
+            Ты лаконичный преподаватель английского для русскоязычного специалиста, который общается с зарубежными клиентами.
+            Отвечай строго НА РУССКОМ языке. Максимум 90–120 слов, без воды и вступлений.
+            Формат ответа:
+            • Ключевые фразы: 2–4 полезных слова, коллокации или фразовых глагола из английского текста в формате `English phrase — перевод (краткий оттенок смысла)`.
+            • Нюанс речи: 1 короткое предложение о тоне или почему носители говорят именно так.
+            """
+            userPrompt = "Английский: \(englishText)\nРусский: \((direction == .enToRu) ? trans : orig)"
+        }
+
+        let raw = try await streamChat(
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            config: config,
+            temperature: 0.3
+        ) { accumulated in
+            if let cb = onPartial {
+                let live = self.cleanStreamingPreview(accumulated, originalCore: orig)
+                if !live.isEmpty {
+                    cb(live)
+                }
+            }
+        }
+
+        let cleaned = cleanModelOutput(raw, originalCore: orig)
+        guard !cleaned.isEmpty else { throw OllamaError.emptyResponse }
+        return cleaned
+    }
+
     private func streamChat(
         systemPrompt: String,
         userPrompt: String,

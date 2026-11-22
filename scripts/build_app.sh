@@ -25,6 +25,7 @@ swiftc -O \
     -framework AppKit \
     -framework SwiftUI \
     -framework ApplicationServices \
+    -framework AVFoundation \
     "$PROJECT_DIR"/Sources/OllamaTranslator/*.swift \
     -o "$BIN_PATH"
 
