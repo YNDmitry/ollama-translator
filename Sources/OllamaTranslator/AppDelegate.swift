@@ -908,7 +908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let vm = FlashcardsViewModel(vocabStore: vocabStore, ollamaClient: ollamaClient)
         flashcardsViewModel = vm
 
-        let view = FlashcardsRootView(vm: vm, vocabStore: vocabStore)
+        let view = FlashcardsRootView(vm: vm, vocabStore: vocabStore, micRecorder: vm.micRecorder)
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
         window.title = "Тренажёр английского (SRS)"

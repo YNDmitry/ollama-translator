@@ -12,6 +12,7 @@ enum PracticeDirection: String, CaseIterable, Identifiable {
     case ruToEn
     case enToRu
     case listening
+    case speaking
 
     var id: String { rawValue }
 
@@ -20,6 +21,7 @@ enum PracticeDirection: String, CaseIterable, Identifiable {
         case .ruToEn: return "RU → EN"
         case .enToRu: return "EN → RU"
         case .listening: return "🎧 Аудирование"
+        case .speaking: return "🗣️ Говорение"
         }
     }
 }
@@ -44,11 +46,20 @@ final class FlashcardsViewModel: ObservableObject {
     @Published var isCheckingWithAI: Bool = false
     @Published var aiError: String? = nil
 
+    // Speaking & Shadowing state
+    let micRecorder = MicRecorder()
+    @Published var isTranscribingSpeech: Bool = false
+    @Published var speakingComparison: PronunciationComparison? = nil
+    @Published var speakingError: String? = nil
+    @Published var whisperReady: Bool = WhisperService.isReady
+
     // Roleplay simulator state
     @Published var selectedScenario: RoleplayScenario = .deadlineShift
     @Published var roleplayMessages: [RoleplayMessage] = []
     @Published var roleplayInput: String = ""
     @Published var isRoleplayBusy: Bool = false
+    @Published var isRecordingRoleplay: Bool = false
+    @Published var isTranscribingRoleplay: Bool = false
     @Published var roleplayAutoSpeak: Bool = true
     @Published var roleplayError: String? = nil
 
@@ -101,11 +112,136 @@ final class FlashcardsViewModel: ObservableObject {
 
     func resetCurrentCardUI() {
         checkTask?.cancel()
+        micRecorder.cancelRecording()
         isAnswerRevealed = false
         userAttempt = ""
         aiFeedback = ""
         isCheckingWithAI = false
         aiError = nil
+        isTranscribingSpeech = false
+        speakingComparison = nil
+        speakingError = nil
+        whisperReady = WhisperService.isReady
+    }
+
+    func toggleSpeakingRecording() {
+        guard let card = currentCard else { return }
+        speakingError = nil
+        whisperReady = WhisperService.isReady
+
+        if micRecorder.isRecording {
+            isTranscribingSpeech = true
+            do {
+                let wavURL = try micRecorder.stopRecording()
+                let expected = card.english
+                Task { [weak self] in
+                    guard let self = self else { return }
+                    defer { try? FileManager.default.removeItem(at: wavURL) }
+                    do {
+                        let heard = try await WhisperService.transcribe(wavURL: wavURL, language: "en")
+                        let comparison = PronunciationDiff.compare(expected: expected, heard: heard)
+                        self.speakingComparison = comparison
+                        self.isTranscribingSpeech = false
+                        self.isAnswerRevealed = true
+                    } catch {
+                        self.speakingError = error.localizedDescription
+                        self.isTranscribingSpeech = false
+                    }
+                }
+            } catch {
+                speakingError = error.localizedDescription
+                isTranscribingSpeech = false
+            }
+        } else {
+            SpeechHelper.shared.stop()
+            speakingComparison = nil
+            aiFeedback = ""
+            aiError = nil
+            Task { [weak self] in
+                guard let self = self else { return }
+                do {
+                    try await self.micRecorder.startRecording()
+                } catch {
+                    self.speakingError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func analyzeSpeakingWithAI() {
+        guard let card = currentCard, let cmp = speakingComparison else { return }
+        checkTask?.cancel()
+        isCheckingWithAI = true
+        aiError = nil
+        aiFeedback = ""
+
+        let cfg = ConfigStore.shared.config
+        checkTask = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let fb = try await self.ollamaClient.evaluateSpeakingAttemptStream(
+                    targetEnglish: card.english,
+                    heardEnglish: cmp.heardClean.isEmpty ? "(тишина / не распознано)" : cmp.heardClean,
+                    accuracy: cmp.accuracyPercent,
+                    config: cfg
+                ) { [weak self] partial in
+                    Task { @MainActor in
+                        self?.aiFeedback = partial
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                self.aiFeedback = fb
+                self.isCheckingWithAI = false
+            } catch OllamaError.cancelled {
+                self.isCheckingWithAI = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.aiError = error.localizedDescription
+                self.isCheckingWithAI = false
+            }
+        }
+    }
+
+    func toggleRoleplayMic() {
+        roleplayError = nil
+        if isRecordingRoleplay {
+            isRecordingRoleplay = false
+            isTranscribingRoleplay = true
+            do {
+                let wavURL = try micRecorder.stopRecording()
+                Task { [weak self] in
+                    guard let self = self else { return }
+                    defer { try? FileManager.default.removeItem(at: wavURL) }
+                    do {
+                        let heard = try await WhisperService.transcribe(wavURL: wavURL, language: "en")
+                        self.isTranscribingRoleplay = false
+                        if !heard.isEmpty {
+                            self.roleplayInput = heard
+                            self.sendRoleplayMessage()
+                        } else {
+                            self.roleplayError = "Не удалось распознать речь — попробуйте чуть громче"
+                        }
+                    } catch {
+                        self.roleplayError = error.localizedDescription
+                        self.isTranscribingRoleplay = false
+                    }
+                }
+            } catch {
+                roleplayError = error.localizedDescription
+                isTranscribingRoleplay = false
+            }
+        } else {
+            SpeechHelper.shared.stop()
+            Task { [weak self] in
+                guard let self = self else { return }
+                do {
+                    try await self.micRecorder.startRecording()
+                    self.isRecordingRoleplay = true
+                } catch {
+                    self.roleplayError = error.localizedDescription
+                }
+            }
+        }
     }
 
     func revealAnswer() {
@@ -323,6 +459,8 @@ final class FlashcardsViewModel: ObservableObject {
 struct FlashcardsRootView: View {
     @ObservedObject var vm: FlashcardsViewModel
     @ObservedObject var vocabStore: VocabStore
+    @ObservedObject var micRecorder: MicRecorder
+    @ObservedObject var whisperDownloader = WhisperModelDownloader.shared
 
     var body: some View {
         VStack(spacing: 12) {
@@ -407,7 +545,7 @@ struct FlashcardsRootView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 360)
+                    .frame(width: 470)
 
                     Spacer()
 
@@ -420,7 +558,43 @@ struct FlashcardsRootView: View {
                     VStack(spacing: 12) {
                         // Card front
                         VStack(alignment: .leading, spacing: 10) {
-                            if vm.practiceDirection == .listening {
+                            if vm.practiceDirection == .speaking {
+                                HStack {
+                                    Label("Прослушайте образец и произнесите вслух (Shadowing)", systemImage: "mic.fill")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(.accentColor)
+                                    Spacer()
+                                    Button {
+                                        SpeechHelper.shared.speakEnglish(card.english)
+                                    } label: {
+                                        Label("Образец", systemImage: "speaker.wave.2.fill")
+                                            .font(.system(size: 11.5))
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+
+                                    Button {
+                                        SpeechHelper.shared.speakEnglish(card.english, speedOverride: 0.75)
+                                    } label: {
+                                        Text("🐢 0.75x")
+                                            .font(.system(size: 11))
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+
+                                Text(card.english)
+                                    .font(.system(size: 19, weight: .bold))
+                                    .foregroundColor(.primary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Text(card.russian)
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else if vm.practiceDirection == .listening {
                                 HStack {
                                     Label("Прослушайте фразу на слух (текст скрыт)", systemImage: "headphones")
                                         .font(.system(size: 12, weight: .semibold))
@@ -487,6 +661,168 @@ struct FlashcardsRootView: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                         )
+
+                        // Speaking & Shadowing Recorder + Word-by-word Diff
+                        if vm.practiceDirection == .speaking {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if !vm.whisperReady {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack {
+                                            Image(systemName: "waveform.badge.exclamationmark")
+                                                .foregroundColor(.orange)
+                                            Text(WhisperService.whisperCLIURL == nil
+                                                 ? "Установите whisper-cli: brew install whisper-cpp"
+                                                 : "Для проверки речи скачайте локальную модель Whisper large-v3-turbo (~574 МБ)")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(.secondary)
+                                            Spacer()
+                                            if whisperDownloader.isDownloading {
+                                                Button("Отмена") { whisperDownloader.cancel() }
+                                                    .controlSize(.small)
+                                            } else if WhisperService.whisperCLIURL != nil {
+                                                Button("Скачать (~574 МБ)") {
+                                                    whisperDownloader.startDownload {
+                                                        vm.whisperReady = WhisperService.isReady
+                                                    }
+                                                }
+                                                .buttonStyle(.borderedProminent)
+                                                .controlSize(.small)
+                                            }
+                                        }
+                                        if whisperDownloader.isDownloading {
+                                            ProgressView(value: whisperDownloader.progress)
+                                                .progressViewStyle(.linear)
+                                            Text(whisperDownloader.statusText)
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                                } else {
+                                    HStack(spacing: 12) {
+                                        Button {
+                                            vm.toggleSpeakingRecording()
+                                        } label: {
+                                            HStack(spacing: 6) {
+                                                if vm.isTranscribingSpeech {
+                                                    ProgressView().controlSize(.small)
+                                                    Text("Распознаю речь...")
+                                                } else if micRecorder.isRecording {
+                                                    Image(systemName: "stop.circle.fill")
+                                                    Text(String(format: "Стоп и проверить (%.1fс)", micRecorder.elapsedSeconds))
+                                                } else {
+                                                    Image(systemName: "mic.fill")
+                                                    Text("Произнести вслух")
+                                                }
+                                            }
+                                            .font(.system(size: 13.5, weight: .semibold))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 3)
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .tint(micRecorder.isRecording ? .red : .accentColor)
+                                        .disabled(vm.isTranscribingSpeech)
+
+                                        if micRecorder.isRecording {
+                                            // Live audio level meter
+                                            GeometryReader { geo in
+                                                ZStack(alignment: .leading) {
+                                                    Capsule().fill(Color.primary.opacity(0.12))
+                                                    Capsule()
+                                                        .fill(Color.red)
+                                                        .frame(width: max(8, geo.size.width * CGFloat(micRecorder.audioLevel)))
+                                                }
+                                            }
+                                            .frame(height: 10)
+                                        }
+
+                                        Spacer()
+                                    }
+                                }
+
+                                if let err = vm.speakingError {
+                                    Text(err)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.red)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                if let cmp = vm.speakingComparison {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack {
+                                            Text("Как вас услышал носитель (Whisper):")
+                                                .font(.system(size: 11.5, weight: .semibold))
+                                                .foregroundColor(.secondary)
+
+                                            Text("\(cmp.accuracyPercent)%")
+                                                .font(.system(size: 12, weight: .bold))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    (cmp.accuracyPercent >= 85 ? Color.green : (cmp.accuracyPercent >= 60 ? Color.orange : Color.red)).opacity(0.2),
+                                                    in: Capsule()
+                                                )
+                                                .foregroundColor(cmp.accuracyPercent >= 85 ? .green : (cmp.accuracyPercent >= 60 ? .orange : .red))
+
+                                            Spacer()
+
+                                            Button {
+                                                vm.analyzeSpeakingWithAI()
+                                            } label: {
+                                                HStack(spacing: 4) {
+                                                    if vm.isCheckingWithAI {
+                                                        ProgressView().controlSize(.mini)
+                                                    } else {
+                                                        Image(systemName: "sparkles")
+                                                    }
+                                                    Text("Советы по произношению")
+                                                }
+                                                .font(.system(size: 11.5))
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                            .disabled(vm.isCheckingWithAI)
+                                        }
+
+                                        // Color-coded word-by-word breakdown
+                                        Text(cmp.words.reduce(AttributedString()) { acc, item in
+                                            var next = acc
+                                            if !next.characters.isEmpty { next.append(AttributedString(" ")) }
+                                            switch item.status {
+                                            case .matched:
+                                                var s = AttributedString(item.expected)
+                                                s.foregroundColor = .green
+                                                next.append(s)
+                                            case .missed:
+                                                var s = AttributedString(item.expected)
+                                                s.foregroundColor = .red
+                                                s.strikethroughStyle = .single
+                                                next.append(s)
+                                            case .substituted(let heard):
+                                                var s = AttributedString("\(item.expected) [→ \(heard)]")
+                                                s.foregroundColor = .orange
+                                                next.append(s)
+                                            }
+                                            return next
+                                        })
+                                        .font(.system(size: 15, weight: .medium))
+                                        .fixedSize(horizontal: false, vertical: true)
+
+                                        Text("Распознано целиком: «\(cmp.heardClean.isEmpty ? "тишина" : cmp.heardClean)»")
+                                            .font(.system(size: 11.5))
+                                            .foregroundColor(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .padding(12)
+                                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+                                    )
+                                }
+                            }
+                        }
 
                         // Active typing + AI evaluation (in RU -> EN and Listening modes)
                         if vm.practiceDirection == .ruToEn || vm.practiceDirection == .listening {
@@ -555,8 +891,8 @@ struct FlashcardsRootView: View {
                             )
                         }
 
-                        // Answer reveal box
-                        if vm.isAnswerRevealed {
+                        // Answer reveal box (not duplicated in Speaking mode since target phrase is already visible)
+                        if vm.isAnswerRevealed && vm.practiceDirection != .speaking {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     Text("Эталонный ответ:")
@@ -875,12 +1211,29 @@ struct FlashcardsRootView: View {
             Divider()
 
             HStack(spacing: 8) {
-                TextField("Ответьте клиенту по-английски...", text: $vm.roleplayInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 13.5))
-                    .onSubmit {
-                        vm.sendRoleplayMessage()
+                Button {
+                    vm.toggleRoleplayMic()
+                } label: {
+                    if vm.isTranscribingRoleplay {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: vm.isRecordingRoleplay ? "stop.circle.fill" : "mic.fill")
+                            .foregroundColor(vm.isRecordingRoleplay ? .red : .primary)
                     }
+                }
+                .buttonStyle(.bordered)
+                .disabled(vm.isRoleplayBusy || vm.isTranscribingRoleplay)
+                .help(vm.isRecordingRoleplay ? "Остановить запись и отправить клиенту" : "Ответить клиенту голосом (Whisper EN)")
+
+                TextField(
+                    vm.isRecordingRoleplay ? "Слушаю ваш английский ответ..." : "Ответьте клиенту по-английски (текстом или голосом 🎙️)...",
+                    text: $vm.roleplayInput
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13.5))
+                .onSubmit {
+                    vm.sendRoleplayMessage()
+                }
 
                 Button {
                     vm.sendRoleplayMessage()
@@ -888,7 +1241,7 @@ struct FlashcardsRootView: View {
                     Label("Отправить", systemImage: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(vm.isRoleplayBusy || vm.roleplayInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(vm.isRoleplayBusy || vm.isRecordingRoleplay || vm.roleplayInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }

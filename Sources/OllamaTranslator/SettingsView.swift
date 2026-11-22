@@ -20,6 +20,8 @@ final class SettingsViewModel: ObservableObject {
     @Published var launchAtLogin: Bool = LaunchAgentManager.isEnabled
     @Published var accessibilityGranted: Bool = TextAutomation.isAccessibilityGranted(prompt: false)
     @Published var kokoroInstalled: Bool = SpeechHelper.isKokoroInstalled
+    @Published var whisperReady: Bool = WhisperService.isReady
+    @Published var whisperCLIFound: Bool = WhisperService.whisperCLIURL != nil
 
     // Glossary tab state
     @Published var newSource: String = ""
@@ -39,6 +41,8 @@ final class SettingsViewModel: ObservableObject {
         accessibilityGranted = TextAutomation.isAccessibilityGranted(prompt: false)
         launchAtLogin = LaunchAgentManager.isEnabled
         kokoroInstalled = SpeechHelper.isKokoroInstalled
+        whisperReady = WhisperService.isReady
+        whisperCLIFound = WhisperService.whisperCLIURL != nil
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -186,6 +190,7 @@ private struct GeneralSettingsTab: View {
     @ObservedObject var store: ConfigStore
     @ObservedObject var vm: SettingsViewModel
     @ObservedObject var downloader = KokoroDownloader.shared
+    @ObservedObject var whisperDownloader = WhisperModelDownloader.shared
     let ollamaClient: OllamaClient
 
     var body: some View {
@@ -344,6 +349,54 @@ private struct GeneralSettingsTab: View {
                         Label("Тест голоса", systemImage: "speaker.wave.2.fill")
                     }
                     .controlSize(.small)
+                }
+            }
+
+            Section("Распознавание речи (Whisper для Говорения 🗣️)") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: vm.whisperReady ? "checkmark.seal.fill" : "waveform.circle")
+                            .foregroundColor(vm.whisperReady ? .green : .orange)
+                        Text(vm.whisperReady
+                             ? "Whisper large-v3-turbo готов (Metal GPU, общая модель для VoiceCopilot)"
+                             : (vm.whisperCLIFound
+                                ? "Модель Whisper large-v3-turbo (~574 МБ) не скачана"
+                                : "Установите whisper-cli: brew install whisper-cpp"))
+                            .font(.system(size: 11.5))
+                            .foregroundColor(.secondary)
+                        Spacer()
+
+                        if whisperDownloader.isDownloading {
+                            Button("Отмена") {
+                                whisperDownloader.cancel()
+                            }
+                            .controlSize(.small)
+                        } else if vm.whisperCLIFound && !vm.whisperReady {
+                            Button("Скачать модель (~574 МБ)") {
+                                whisperDownloader.startDownload {
+                                    vm.refreshSystemStatus()
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    if whisperDownloader.isDownloading {
+                        ProgressView(value: whisperDownloader.progress)
+                            .progressViewStyle(.linear)
+                        Text(whisperDownloader.statusText)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    } else if let err = whisperDownloader.errorMessage {
+                        Text(err)
+                            .font(.system(size: 11))
+                            .foregroundColor(.red)
+                    } else if !whisperDownloader.statusText.isEmpty {
+                        Text(whisperDownloader.statusText)
+                            .font(.system(size: 11))
+                            .foregroundColor(.green)
+                    }
                 }
             }
 

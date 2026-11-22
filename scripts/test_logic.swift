@@ -154,6 +154,27 @@ struct TestRunner {
         let rpNone = client.parseRoleplayResponse("COACH: Идеально!\nBETTER: NONE\nCLIENT: Sounds great!")
         assertEqual(rpNone.betterPhrase, nil, "Roleplay BETTER: NONE parses as nil")
 
+        // 9. Speaking & Shadowing word-by-word pronunciation diff
+        let exact = PronunciationDiff.compare(
+            expected: "Just a quick heads-up regarding the timeline.",
+            heard: "just a quick heads up regarding the timeline"
+        )
+        assertEqual(exact.accuracyPercent, 100, "Hyphenated word split matches 100%")
+
+        let perfect = PronunciationDiff.compare(
+            expected: "Could we hop on a quick call tomorrow?",
+            heard: "Could we hop on a quick call tomorrow"
+        )
+        assertEqual(perfect.accuracyPercent, 100, "Exact match scores 100%")
+
+        let partial = PronunciationDiff.compare(
+            expected: "Everything looks good on my end.",
+            heard: "Everything look great on end"
+        )
+        assertEqual(partial.words[0].status, .matched, "First word matched")
+        assertEqual(partial.words[1].status, .substituted(heard: "look"), "Substituted word detected")
+        assertEqual(partial.words[4].status, .missed, "Missed word detected")
+
         print("All logic assertions passed!")
     }
 }

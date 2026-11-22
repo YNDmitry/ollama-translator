@@ -176,9 +176,11 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.5.0</string>
+    <string>2.6.0</string>
     <key>CFBundleVersion</key>
-    <string>7</string>
+    <string>8</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>OllamaTranslator использует микрофон для локальной тренировки произношения (Speaking &amp; Shadowing) и голосовых ответов в диалоге с клиентом.</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

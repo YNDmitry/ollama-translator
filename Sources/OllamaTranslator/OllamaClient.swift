@@ -408,6 +408,46 @@ final class OllamaClient {
         return cleaned
     }
 
+    /// Coaches the user's spoken pronunciation attempt (Shadowing / Speaking mode).
+    func evaluateSpeakingAttemptStream(
+        targetEnglish: String,
+        heardEnglish: String,
+        accuracy: Int,
+        config: AppConfig,
+        onPartial: (@Sendable (String) -> Void)?
+    ) async throws -> String {
+        let systemPrompt = """
+        Ты доброжелательный коуч по разговорному английскому и произношению для русскоязычного специалиста.
+        Пользователь тренировал произношение (Shadowing): произнёс целевую английскую фразу вслух, а Whisper записал то, как речь услышалась.
+        Дай лаконичный разбор строго НА РУССКОМ языке (максимум 70–90 слов):
+        • Короткая похвала/итог.
+        • Какие 1–2 слова проглотились или прозвучали нечётко, и как именно их произнести (ударение, связка слов, редукция или звук th/r/w).
+        """
+
+        let userPrompt = """
+        Целевая фраза: \(targetEnglish)
+        Что услышал Whisper (\(accuracy)%): \(heardEnglish)
+        """
+
+        let raw = try await streamChat(
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            config: config,
+            temperature: 0.25
+        ) { accumulated in
+            if let cb = onPartial {
+                let live = self.cleanStreamingPreview(accumulated, originalCore: heardEnglish)
+                if !live.isEmpty {
+                    cb(live)
+                }
+            }
+        }
+
+        let cleaned = cleanModelOutput(raw, originalCore: heardEnglish)
+        guard !cleaned.isEmpty else { throw OllamaError.emptyResponse }
+        return cleaned
+    }
+
     /// Extracts 2–3 reusable business/conversational English phrases for SRS flashcards.
     func extractUsefulPhrases(englishText: String, config: AppConfig) async throws -> [ExtractedPhrase] {
         let core = englishText.trimmingCharacters(in: .whitespacesAndNewlines)

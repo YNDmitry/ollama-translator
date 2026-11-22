@@ -48,6 +48,8 @@ ollama-translator/
     ├── TextAutomation.swift         # Accessibility check, AXSelectedText + modifier-safe ⌘A/⌘C/⌘V, full pasteboard snapshot/restore
     ├── SpeechHelper.swift           # Local Kokoro-82M neural TTS (auto-started local HTTP daemon + AVAudioPlayer) with AVSpeechSynthesizer fallback
     ├── KokoroDownloader.swift       # In-app URLSessionDownloadDelegate downloader for Kokoro-82M weights with live progress & cancel
+    ├── MicRecorder.swift            # AVAudioEngine 16 kHz mono PCM WAV recorder with live RMS level meter
+    ├── WhisperService.swift         # Local whisper-cli runner (shared ~/Library/Application Support/WhisperModels/), model downloader, and LCS PronunciationDiff
     ├── LaunchAgentManager.swift     # Login auto-start toggle via ~/Library/LaunchAgents/com.local.OllamaTranslator.plist
     ├── HUDPanel.swift               # Non-activating floating NSPanel HUD (loading, toast, streaming popup, inline Coach/Reply/Glossary)
     ├── QuickTranslatorWindow.swift  # Standalone floating translator window (⌃⌥G) with streaming, TTS, Coach, and bookmarking
