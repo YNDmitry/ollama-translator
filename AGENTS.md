@@ -47,6 +47,7 @@ ollama-translator/
     ├── HotkeyManager.swift          # Global Carbon hotkeys (works in both RU & EN keyboard layouts)
     ├── TextAutomation.swift         # Accessibility check, AXSelectedText + modifier-safe ⌘A/⌘C/⌘V, full pasteboard snapshot/restore
     ├── SpeechHelper.swift           # Local Kokoro-82M neural TTS (auto-started local HTTP daemon + AVAudioPlayer) with AVSpeechSynthesizer fallback
+    ├── KokoroDownloader.swift       # In-app URLSessionDownloadDelegate downloader for Kokoro-82M weights with live progress & cancel
     ├── LaunchAgentManager.swift     # Login auto-start toggle via ~/Library/LaunchAgents/com.local.OllamaTranslator.plist
     ├── HUDPanel.swift               # Non-activating floating NSPanel HUD (loading, toast, streaming popup, inline Coach/Reply/Glossary)
     ├── QuickTranslatorWindow.swift  # Standalone floating translator window (⌃⌥G) with streaming, TTS, Coach, and bookmarking

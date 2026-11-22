@@ -299,7 +299,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.hud.viewModel.isGeneratingReply = true
             self.isTranslating = true
 
-            self.replyTask = Task { @MainActor in
+            self.replyTask = Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 do {
                     let res = try await self.ollamaClient.translateContextReplyStream(
                         clientMessage: clientMessage,
@@ -668,7 +669,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let cfg = configStore.config
         let allowAutoSelect = replaceInPlace && cfg.autoSelectAllWhenEmpty
 
-        currentTask = Task { @MainActor in
+        currentTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
             let capture = await TextAutomation.captureSelectedText(allowAutoSelectAll: allowAutoSelect)
 
             if capture.autoSelectTooLong {
@@ -803,7 +805,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
 
         let cfg = configStore.config
-        currentTask = Task { @MainActor in
+        currentTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
             do {
                 let result = try await self.ollamaClient.translateStream(
                     text: originalText,

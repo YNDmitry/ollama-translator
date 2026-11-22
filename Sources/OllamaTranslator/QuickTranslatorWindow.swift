@@ -50,10 +50,11 @@ final class QuickTranslatorViewModel: ObservableObject {
         let selectedTone = tone
         let selectedDirection = direction
 
-        activeTask = Task {
+        activeTask = Task { [weak self] in
+            guard let self = self else { return }
             do {
-                let res = try await client.translateStream(
-                    text: inputText,
+                let res = try await self.client.translateStream(
+                    text: self.inputText,
                     config: cfg,
                     toneOverride: selectedTone,
                     directionOverride: selectedDirection,
@@ -159,9 +160,10 @@ final class QuickTranslatorViewModel: ObservableObject {
         let trans = outputText
         let dir = lastResolvedDirection
 
-        explainTask = Task {
+        explainTask = Task { [weak self] in
+            guard let self = self else { return }
             do {
-                let text = try await client.explainPhraseStream(
+                let text = try await self.client.explainPhraseStream(
                     originalText: orig,
                     translatedText: trans,
                     direction: dir,

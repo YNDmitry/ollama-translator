@@ -6,17 +6,24 @@ A lightweight, native macOS menu bar app for fast local **Russian ↔ English** 
 
 Zero cloud APIs, zero subscriptions, 100% local and private. Pre-configured for `hf.co/mradermacher/Qwen3.5-4B-SOMPOA-heresy-v2-GGUF:Q4_K_M` (and works with any Ollama model).
 
+<p align="center">
+  <img src="docs/assets/popup-hud.png" alt="Floating Translation Popup with AI English Coach and Context Reply" width="46%" />
+  &nbsp;
+  <img src="docs/assets/english-trainer.png" alt="Spaced Repetition English Trainer with AI Grading and Kokoro Rust TTS" width="51%" />
+</p>
+
 ## Download
 
 Grab the prebuilt Apple Silicon bundle from **[GitHub Releases](https://github.com/YNDmitry/ollama-translator/releases/latest)**:
 
-1. Download and unzip `OllamaTranslator-v2.0.0-arm64.zip`.
+1. Download and unzip `OllamaTranslator-v2.5.0-arm64.zip`.
 2. Drag `OllamaTranslator.app` to `/Applications/`.
 3. If macOS Gatekeeper warns about an unsigned app, clear quarantine:
    ```bash
    xattr -dr com.apple.quarantine /Applications/OllamaTranslator.app
    ```
 4. Launch the app and grant **System Settings → Privacy & Security → Accessibility** so it can read selected text and paste translations in place.
+5. *(Optional)* Open **Settings → General → Text-to-Speech (TTS)** and click **Download Model (~338 MB)** to enable lifelike offline **Kokoro-82M** voices — no Terminal or Python required!
 
 ## Global Hotkeys (work in both RU & EN keyboard layouts)
 
@@ -50,6 +57,18 @@ All shortcuts can be customized in **Settings → Hotkeys**.
 - **Translation History**: last 50 translations searchable in Settings, plus the last 10 accessible for 1-click copy from the menu bar.
 - **Optimized for Qwen3.5**: disables reasoning mode (`think: false`), strips residual `<think>` tags, and keeps the model warm in memory (`keep_alive: 30m`).
 - **Ollama Status & Launcher**: live connection indicator in the menu bar with 1-click Ollama launch if it isn't running.
+
+## Hybrid Architecture
+
+```mermaid
+flowchart LR
+    UI["Swift macOS Menu Bar App\n(AppKit + SwiftUI + Carbon Hotkeys)"]
+    LLM["Local Ollama API\n(Qwen3.5-4B • think:false • keep_alive)"]
+    TTS["Bundled Native Rust Engine\n(kokoro-tts-rs • ONNX + Misaki G2P)"]
+
+    UI <-->|"Streaming /api/chat"| LLM
+    UI <-->|"Local HTTP 127.0.0.1:18421\n(auto-unload 10m idle + LRU cache)"| TTS
+```
 
 ## Build from Source
 
