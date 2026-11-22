@@ -39,7 +39,7 @@ All shortcuts can be customized in **Settings → Hotkeys**.
 - **Context-aware client replies**: highlight an incoming client message → press `⌃⌥P` → click **Reply**, type your answer in Russian, and hit `Enter`. The model uses the client's message as context to produce a natural English reply ready to copy or paste straight into the chat.
 - **Active English Learning Suite**:
   - **AI English Coach (`🎓`)** — get a concise Russian breakdown of key vocabulary, phrasal verbs, grammar improvements, and tone nuances right inside the popup or Quick Translator.
-  - **Native Pronunciation (`🔊`)** — listen to any English phrase offline using macOS native speech synthesis.
+  - **Lifelike Local Pronunciation (`🔊`)** — supports **Kokoro-82M** neural offline English voices (US & UK, ~200ms latency on Apple Silicon) with automatic fallback to macOS native speech synthesis. Run `./scripts/setup_kokoro_tts.sh` once to enable studio-quality Kokoro voices.
   - **Spaced-Repetition Flashcards (`⌃⌥L`)** — bookmark real phrases (`★`) from popups or translation history, practice `RU → EN` / `EN → RU` with SM-2-lite scheduling, type your own English translation for instant AI grading, track your daily streak (`🔥`), and export your deck to **Anki (`.tsv`)**.
 - **Custom Glossary / Word Replacements**: define preferred translations or strict substitutions per word/phrase — either from Settings or inline right inside the popup:
   - *AI Hint* — injected into the system prompt so the term is inflected naturally in context.

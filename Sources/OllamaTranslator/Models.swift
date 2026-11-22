@@ -142,6 +142,34 @@ struct HotkeyBinding: Codable, Equatable {
     }
 }
 
+enum TTSEngine: String, Codable, CaseIterable, Identifiable {
+    case kokoro
+    case system
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .kokoro: return "Kokoro-82M (нейросеть, живой голос)"
+        case .system: return "Системный голос macOS"
+        }
+    }
+}
+
+struct KokoroVoiceOption: Identifiable, Equatable {
+    let id: String
+    let label: String
+
+    static let presets: [KokoroVoiceOption] = [
+        KokoroVoiceOption(id: "af_heart", label: "Heart — US Женский (живой, тёплый)"),
+        KokoroVoiceOption(id: "af_bella", label: "Bella — US Женский (деловой)"),
+        KokoroVoiceOption(id: "am_michael", label: "Michael — US Мужской (уверенный)"),
+        KokoroVoiceOption(id: "am_fenrir", label: "Fenrir — US Мужской (глубокий)"),
+        KokoroVoiceOption(id: "bf_emma", label: "Emma — UK Женский (британский)"),
+        KokoroVoiceOption(id: "bm_george", label: "George — UK Мужской (британский)")
+    ]
+}
+
 struct AppConfig: Codable, Equatable {
     var ollamaBaseURL: String = "http://127.0.0.1:11434"
     var modelName: String = "hf.co/mradermacher/Qwen3.5-4B-SOMPOA-heresy-v2-GGUF:Q4_K_M"
@@ -157,6 +185,10 @@ struct AppConfig: Codable, Equatable {
     var restoreClipboardAfterReplace: Bool = true
     var autoSelectAllWhenEmpty: Bool = true
     var customSystemNotes: String = ""
+    var ttsEngine: TTSEngine = .kokoro
+    var kokoroVoice: String = "af_heart"
+    var systemVoiceIdentifier: String = ""
+    var ttsSpeed: Double = 0.95
 
     init() {}
 
@@ -177,6 +209,10 @@ struct AppConfig: Codable, Equatable {
         restoreClipboardAfterReplace = (try? c.decodeIfPresent(Bool.self, forKey: .restoreClipboardAfterReplace)) ?? d.restoreClipboardAfterReplace
         autoSelectAllWhenEmpty = (try? c.decodeIfPresent(Bool.self, forKey: .autoSelectAllWhenEmpty)) ?? d.autoSelectAllWhenEmpty
         customSystemNotes = (try? c.decodeIfPresent(String.self, forKey: .customSystemNotes)) ?? d.customSystemNotes
+        ttsEngine = (try? c.decodeIfPresent(TTSEngine.self, forKey: .ttsEngine)) ?? d.ttsEngine
+        kokoroVoice = (try? c.decodeIfPresent(String.self, forKey: .kokoroVoice)) ?? d.kokoroVoice
+        systemVoiceIdentifier = (try? c.decodeIfPresent(String.self, forKey: .systemVoiceIdentifier)) ?? d.systemVoiceIdentifier
+        ttsSpeed = (try? c.decodeIfPresent(Double.self, forKey: .ttsSpeed)) ?? d.ttsSpeed
     }
 }
 

@@ -360,13 +360,15 @@ struct QuickTranslatorView: View {
                             .foregroundColor(.accentColor)
                         ScrollView {
                             Text(vm.explanationText.isEmpty ? "Разбираю лексику и стиль..." : vm.explanationText)
-                                .font(.system(size: 12.5))
+                                .font(.system(size: 13))
+                                .lineSpacing(2.5)
                                 .foregroundColor(vm.explanationText.isEmpty ? .secondary : .primary)
                                 .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
+                                .padding(10)
                         }
-                        .frame(minHeight: 75, maxHeight: 130)
+                        .frame(minHeight: 95, maxHeight: 200)
                         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     }
                     .padding(.top, 4)
@@ -374,6 +376,6 @@ struct QuickTranslatorView: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 540, minHeight: 420)
+        .frame(minWidth: 580, minHeight: 500)
     }
 }

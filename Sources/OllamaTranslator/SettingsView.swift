@@ -19,6 +19,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var isChecking: Bool = false
     @Published var launchAtLogin: Bool = LaunchAgentManager.isEnabled
     @Published var accessibilityGranted: Bool = TextAutomation.isAccessibilityGranted(prompt: false)
+    @Published var kokoroInstalled: Bool = SpeechHelper.isKokoroInstalled
 
     // Glossary tab state
     @Published var newSource: String = ""
@@ -37,6 +38,7 @@ final class SettingsViewModel: ObservableObject {
     func refreshSystemStatus() {
         accessibilityGranted = TextAutomation.isAccessibilityGranted(prompt: false)
         launchAtLogin = LaunchAgentManager.isEnabled
+        kokoroInstalled = SpeechHelper.isKokoroInstalled
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -173,7 +175,7 @@ struct SettingsRootView: View {
                 .tag(SettingsTab.history)
         }
         .padding(16)
-        .frame(width: 680, height: 530)
+        .frame(width: 700, height: 600)
         .onDisappear {
             vm.stopRecording()
         }
@@ -253,6 +255,56 @@ private struct GeneralSettingsTab: View {
                         .foregroundColor(.secondary)
                     TextField("Например: Обращайся на «вы», не переводи названия брендов...", text: $store.config.customSystemNotes)
                         .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            Section("Озвучка произношения (TTS)") {
+                Picker("Движок озвучки", selection: $store.config.ttsEngine) {
+                    ForEach(TTSEngine.allCases) { engine in
+                        Text(engine.title).tag(engine)
+                    }
+                }
+
+                if store.config.ttsEngine == .kokoro {
+                    Picker("Голос Kokoro-82M", selection: $store.config.kokoroVoice) {
+                        ForEach(KokoroVoiceOption.presets) { option in
+                            Text(option.label).tag(option.id)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Image(systemName: vm.kokoroInstalled ? "checkmark.seal.fill" : "arrow.down.circle")
+                            .foregroundColor(vm.kokoroInstalled ? .green : .orange)
+                        Text(vm.kokoroInstalled
+                             ? "Kokoro-82M установлен и работает локально офлайн"
+                             : "Kokoro не установлен — сейчас используется системный голос. Запустите scripts/setup_kokoro_tts.sh")
+                            .font(.system(size: 11.5))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button("Обновить") {
+                            vm.refreshSystemStatus()
+                        }
+                        .controlSize(.small)
+                    }
+                } else {
+                    Picker("Системный голос EN", selection: $store.config.systemVoiceIdentifier) {
+                        Text("Авто (лучший доступный en-US)").tag("")
+                        ForEach(SpeechHelper.installedEnglishSystemVoices(), id: \.identifier) { voice in
+                            Text("\(voice.name) (\(voice.language))").tag(voice.identifier)
+                        }
+                    }
+                }
+
+                HStack {
+                    Text(String(format: "Скорость речи: %.2fx", store.config.ttsSpeed))
+                        .font(.system(size: 12.5))
+                    Slider(value: $store.config.ttsSpeed, in: 0.75...1.25, step: 0.05)
+                    Button {
+                        SpeechHelper.shared.speakEnglish("Just a quick heads-up regarding the timeline. Everything looks great on my end!")
+                    } label: {
+                        Label("Тест голоса", systemImage: "speaker.wave.2.fill")
+                    }
+                    .controlSize(.small)
                 }
             }
 

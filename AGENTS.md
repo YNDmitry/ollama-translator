@@ -25,8 +25,10 @@ ollama-translator/
 ├── LICENSE                          # MIT
 ├── .gitignore                       # Ignores .build/, dist/, .DS_Store, etc.
 ├── scripts/
-│   ├── build_app.sh                 # Release build, icon generation, .app bundling, ad-hoc codesign
-│   └── test_logic.swift             # Standalone unit test runner (35+ assertions)
+│   ├── build_app.sh                 # Release build, icon generation, .app bundling (incl. kokoro_tts_server.py), ad-hoc codesign
+│   ├── kokoro_tts_server.py         # Lightweight local HTTP TTS server (127.0.0.1:18421) for Kokoro-82M neural voices
+│   ├── setup_kokoro_tts.sh          # One-command installer for Kokoro-82M venv + v1.0 ONNX model & voices
+│   └── test_logic.swift             # Standalone unit test runner (38+ assertions)
 └── Sources/OllamaTranslator/
     ├── main.swift                   # NSApplication bootstrap (.accessory policy, MainActor.assumeIsolated)
     ├── AppDelegate.swift            # Menu bar (NSStatusItem), Ollama health check, workflow orchestration, window lifecycle
@@ -38,7 +40,7 @@ ollama-translator/
     ├── OllamaClient.swift           # Async/streaming Ollama /api/chat & /api/tags client, prompts, <think> stripping, exact glossary replace
     ├── HotkeyManager.swift          # Global Carbon hotkeys (works in both RU & EN keyboard layouts)
     ├── TextAutomation.swift         # Accessibility check, AXSelectedText + modifier-safe ⌘A/⌘C/⌘V, full pasteboard snapshot/restore
-    ├── SpeechHelper.swift           # Offline native English pronunciation via AVSpeechSynthesizer
+    ├── SpeechHelper.swift           # Local Kokoro-82M neural TTS (auto-started local HTTP daemon + AVAudioPlayer) with AVSpeechSynthesizer fallback
     ├── LaunchAgentManager.swift     # Login auto-start toggle via ~/Library/LaunchAgents/com.local.OllamaTranslator.plist
     ├── HUDPanel.swift               # Non-activating floating NSPanel HUD (loading, toast, streaming popup, inline Coach/Reply/Glossary)
     ├── QuickTranslatorWindow.swift  # Standalone floating translator window (⌃⌥G) with streaming, TTS, Coach, and bookmarking

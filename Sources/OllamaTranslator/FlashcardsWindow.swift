@@ -230,7 +230,7 @@ struct FlashcardsRootView: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 580, minHeight: 480)
+        .frame(minWidth: 620, idealWidth: 680, minHeight: 540, idealHeight: 640)
     }
 
     @ViewBuilder
@@ -264,7 +264,7 @@ struct FlashcardsRootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let card = vm.currentCard {
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 HStack {
                     Picker("Режим:", selection: $vm.practiceDirection) {
                         ForEach(PracticeDirection.allCases) { dir in
@@ -281,123 +281,150 @@ struct FlashcardsRootView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Flashcard front
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text(vm.practiceDirection == .ruToEn ? "Переведите на английский:" : "Что означает эта фраза?")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        if vm.practiceDirection == .enToRu {
-                            Button {
-                                SpeechHelper.shared.speakEnglish(card.english)
-                            } label: {
-                                Label("Озвучить", systemImage: "speaker.wave.2")
-                                    .font(.system(size: 11.5))
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-
-                    Text(vm.practiceDirection == .ruToEn ? card.russian : card.english)
-                        .font(.system(size: 18, weight: .semibold))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(16)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-                )
-
-                // Active typing + AI evaluation (in RU -> EN mode)
-                if vm.practiceDirection == .ruToEn {
-                    HStack(spacing: 8) {
-                        TextField("Попробуйте написать свой вариант по-английски...", text: $vm.userAttempt)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 13.5))
-                            .onSubmit {
-                                vm.checkAttemptWithAI()
-                            }
-
-                        Button {
-                            vm.checkAttemptWithAI()
-                        } label: {
-                            HStack(spacing: 5) {
-                                if vm.isCheckingWithAI {
-                                    ProgressView().controlSize(.mini)
-                                } else {
-                                    Image(systemName: "sparkles")
+                // Scrollable central area so AI feedback & long phrases NEVER get squeezed or cut off
+                ScrollView {
+                    VStack(spacing: 12) {
+                        // Flashcard front
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text(vm.practiceDirection == .ruToEn ? "Переведите на английский:" : "Что означает эта фраза?")
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                if vm.practiceDirection == .enToRu {
+                                    Button {
+                                        SpeechHelper.shared.speakEnglish(card.english)
+                                    } label: {
+                                        Label("Озвучить", systemImage: "speaker.wave.2")
+                                            .font(.system(size: 11.5))
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
                                 }
-                                Text("Проверить с ИИ")
+                            }
+
+                            Text(vm.practiceDirection == .ruToEn ? card.russian : card.english)
+                                .font(.system(size: 18, weight: .semibold))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(16)
+                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                        )
+
+                        // Active typing + AI evaluation (in RU -> EN mode)
+                        if vm.practiceDirection == .ruToEn {
+                            HStack(spacing: 8) {
+                                TextField("Попробуйте написать свой вариант по-английски...", text: $vm.userAttempt)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 13.5))
+                                    .onSubmit {
+                                        vm.checkAttemptWithAI()
+                                    }
+
+                                Button {
+                                    vm.checkAttemptWithAI()
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        if vm.isCheckingWithAI {
+                                            ProgressView().controlSize(.mini)
+                                        } else {
+                                            Image(systemName: "sparkles")
+                                        }
+                                        Text("Проверить с ИИ")
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(vm.isCheckingWithAI || vm.userAttempt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(vm.isCheckingWithAI || vm.userAttempt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        // AI evaluation feedback box — expands fully, never truncated!
+                        if let err = vm.aiError {
+                            Text(err)
+                                .font(.system(size: 12.5))
+                                .foregroundColor(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if vm.isCheckingWithAI || !vm.aiFeedback.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Label("Оценка ИИ", systemImage: "sparkles")
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                        .foregroundColor(.accentColor)
+                                    if vm.isCheckingWithAI {
+                                        ProgressView().controlSize(.mini)
+                                    }
+                                    Spacer()
+                                }
+
+                                Text(vm.aiFeedback.isEmpty ? "Проверяю ваш вариант..." : vm.aiFeedback)
+                                    .font(.system(size: 13.5))
+                                    .lineSpacing(3)
+                                    .foregroundColor(vm.aiFeedback.isEmpty ? .secondary : .primary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(14)
+                            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.accentColor.opacity(0.24), lineWidth: 1)
+                            )
+                        }
+
+                        // Answer reveal box
+                        if vm.isAnswerRevealed {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Эталонный ответ:")
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Button {
+                                        SpeechHelper.shared.speakEnglish(card.english)
+                                    } label: {
+                                        Label("Озвучить EN", systemImage: "speaker.wave.2.fill")
+                                            .font(.system(size: 11.5))
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+
+                                Text(vm.practiceDirection == .ruToEn ? card.english : card.russian)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.accentColor)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if !card.note.isEmpty {
+                                    Text("Заметка: \(card.note)")
+                                        .font(.system(size: 12.5))
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(14)
+                            .background(Color.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.green.opacity(0.25), lineWidth: 1)
+                            )
+                        }
                     }
+                    .padding(.vertical, 2)
                 }
 
-                // AI evaluation feedback box
-                if let err = vm.aiError {
-                    Text(err)
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if vm.isCheckingWithAI || !vm.aiFeedback.isEmpty {
-                    ScrollView {
-                        Text(vm.aiFeedback.isEmpty ? "Проверяю ваш вариант..." : vm.aiFeedback)
-                            .font(.system(size: 12.5))
-                            .foregroundColor(vm.aiFeedback.isEmpty ? .secondary : .primary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                    }
-                    .frame(maxHeight: 95)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                }
+                Divider()
 
-                // Answer reveal box
+                // Pinned bottom controls
                 if vm.isAnswerRevealed {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Эталонный ответ:")
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button {
-                                SpeechHelper.shared.speakEnglish(card.english)
-                            } label: {
-                                Label("Озвучить EN", systemImage: "speaker.wave.2.fill")
-                                    .font(.system(size: 11.5))
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        Text(vm.practiceDirection == .ruToEn ? card.english : card.russian)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.accentColor)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        if !card.note.isEmpty {
-                            Text("Заметка: \(card.note)")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(14)
-                    .background(Color.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(Color.green.opacity(0.25), lineWidth: 1)
-                    )
-
-                    Spacer(minLength: 0)
-
-                    // SRS Rating buttons
                     HStack(spacing: 12) {
                         Button {
                             vm.rateCurrent(.again)
@@ -407,7 +434,7 @@ struct FlashcardsRootView: View {
                                 Text("10 мин").font(.system(size: 10.5)).foregroundColor(.secondary)
                             }
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 5)
                         }
                         .buttonStyle(.bordered)
                         .tint(.red)
@@ -421,7 +448,7 @@ struct FlashcardsRootView: View {
                                 Text(card.repetitions == 0 ? "1 день" : "дальше").font(.system(size: 10.5)).foregroundColor(.white.opacity(0.85))
                             }
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 5)
                         }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut("2", modifiers: [])
@@ -434,15 +461,13 @@ struct FlashcardsRootView: View {
                                 Text(card.repetitions == 0 ? "2 дня" : "быстрее").font(.system(size: 10.5)).foregroundColor(.secondary)
                             }
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 5)
                         }
                         .buttonStyle(.bordered)
                         .tint(.green)
                         .keyboardShortcut("3", modifiers: [])
                     }
                 } else {
-                    Spacer(minLength: 0)
-
                     Button {
                         vm.revealAnswer()
                     } label: {

@@ -36,6 +36,11 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+if [ -f "$PROJECT_DIR/scripts/kokoro_tts_server.py" ]; then
+    cp "$PROJECT_DIR/scripts/kokoro_tts_server.py" "$APP_BUNDLE/Contents/Resources/kokoro_tts_server.py"
+    chmod +x "$APP_BUNDLE/Contents/Resources/kokoro_tts_server.py"
+fi
+
 # Generate crisp native app icon (.icns) using Swift + sips + iconutil
 ICONSET_DIR="$PROJECT_DIR/.build/AppIcon.iconset"
 BASE_ICON="$PROJECT_DIR/.build/icon_1024.png"
@@ -159,9 +164,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.0</string>
+    <string>2.2.0</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>4</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
