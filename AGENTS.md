@@ -9,7 +9,7 @@ This file provides complete architectural context, build/test commands, and macO
 - **Default Ollama endpoint**: `http://127.0.0.1:11434`
 - **Default model**: `hf.co/mradermacher/Qwen3.5-4B-SOMPOA-heresy-v2-GGUF:Q4_K_M` (user-configurable; works with any Ollama chat model)
 - **Target OS**: macOS 13.0+ (built natively for `arm64` / host arch)
-- **Frameworks**: `AppKit`, `SwiftUI`, `Carbon`, `ApplicationServices`, `AVFoundation`, `Foundation` (zero external SwiftPM packages)
+- **Frameworks**: `AppKit`, `SwiftUI`, `Carbon`, `ApplicationServices`, `AVFoundation`, `Foundation` (Swift UI) + standalone native Rust crate `rust-tts/` (`kokoro-tts-rs`: `ort` + `misaki-rs` + `tiny_http`, statically linked, zero Python/espeak-ng runtime dependencies)
 - **UI language**: Russian (documentation is bilingual: `README.md` in English by default, `README.ru.md` in Russian)
 
 ---
@@ -24,10 +24,16 @@ ollama-translator/
 ├── README.ru.md                     # Russian README
 ├── LICENSE                          # MIT
 ├── .gitignore                       # Ignores .build/, dist/, .DS_Store, etc.
+├── rust-tts/                        # Native Rust Kokoro-82M TTS server (zero Python, zero espeak-ng)
+│   ├── Cargo.toml                   # ort (static ONNX Runtime) + misaki-rs (pure Rust US/UK G2P) + tiny_http
+│   ├── build.rs                     # Links Apple clang_rt.osx for CoreML version check symbol
+│   ├── .cargo/config.toml           # Sets MACOSX_DEPLOYMENT_TARGET=14.0
+│   ├── assets/kokoro_config.json    # Official hexgrad/Kokoro-82M IPA vocab embedded at compile time
+│   └── src/main.rs                  # HTTP /health, /tts, /shutdown + 10m idle timeout + parent-PID watchdog + unit tests
 ├── scripts/
-│   ├── build_app.sh                 # Release build, icon generation, .app bundling (incl. kokoro_tts_server.py), ad-hoc codesign
-│   ├── kokoro_tts_server.py         # Lightweight local HTTP TTS server (127.0.0.1:18421) with 10m idle-shutdown, parent-PID watchdog, and /shutdown
-│   ├── setup_kokoro_tts.sh          # One-command installer for Kokoro-82M venv + v1.0 ONNX model & voices
+│   ├── build_app.sh                 # Release build (Swift + bundles kokoro-tts-rs), icon generation, .app bundling, ad-hoc codesign
+│   ├── kokoro_tts_server.py         # Legacy Python fallback TTS server
+│   ├── setup_kokoro_tts.sh          # Downloads ONLY Kokoro ONNX weights & voices (zero Python needed!)
 │   └── test_logic.swift             # Standalone unit test runner (45+ assertions)
 └── Sources/OllamaTranslator/
     ├── main.swift                   # NSApplication bootstrap (.accessory policy, MainActor.assumeIsolated)

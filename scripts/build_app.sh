@@ -36,6 +36,18 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+# Bundle native Rust Kokoro TTS binary if built (or build offline if Cargo cache exists)
+RUST_BIN="$PROJECT_DIR/rust-tts/target/release/kokoro-tts-rs"
+if [ ! -f "$RUST_BIN" ] && [ -f "$PROJECT_DIR/rust-tts/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+    echo "==> Building native Rust Kokoro TTS engine (kokoro-tts-rs)..."
+    cargo build --release --manifest-path "$PROJECT_DIR/rust-tts/Cargo.toml" || true
+fi
+if [ -f "$RUST_BIN" ]; then
+    echo "==> Bundling native Rust TTS binary (kokoro-tts-rs)..."
+    cp "$RUST_BIN" "$APP_BUNDLE/Contents/MacOS/kokoro-tts-rs"
+    chmod +x "$APP_BUNDLE/Contents/MacOS/kokoro-tts-rs"
+fi
+
 if [ -f "$PROJECT_DIR/scripts/kokoro_tts_server.py" ]; then
     cp "$PROJECT_DIR/scripts/kokoro_tts_server.py" "$APP_BUNDLE/Contents/Resources/kokoro_tts_server.py"
     chmod +x "$APP_BUNDLE/Contents/Resources/kokoro_tts_server.py"
@@ -164,9 +176,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.3.0</string>
+    <string>2.4.0</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>6</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
