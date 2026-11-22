@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let configStore = ConfigStore.shared
     private let historyStore = HistoryStore.shared
+    private let vocabStore = VocabStore.shared
     private let ollamaClient = OllamaClient()
     private let hud = HUDController()
     private var hotkeyManager: HotkeyManager?
@@ -14,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settingsViewModel = SettingsViewModel()
     private var quickWindow: NSWindow?
     private var quickViewModel: QuickTranslatorViewModel?
+    private var flashcardsWindow: NSWindow?
+    private var flashcardsViewModel: FlashcardsViewModel?
 
     private var currentTask: Task<Void, Never>?
     private var replyTask: Task<Void, Never>?
@@ -174,6 +177,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         hud.onSpeakEnglish = { text in
             SpeechHelper.shared.speakEnglish(text)
+        }
+
+        hud.onSaveToVocab = { [weak self] in
+            guard let self = self else { return }
+            let orig = self.hud.viewModel.originalText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trans = self.hud.viewModel.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !orig.isEmpty, !trans.isEmpty else { return }
+
+            let dir = self.hud.viewModel.direction
+            let english: String
+            let russian: String
+            if dir == .enToRu {
+                english = orig
+                russian = trans
+            } else if dir == .polishEn {
+                english = trans
+                russian = "Улучшенный вариант: \(orig)"
+            } else {
+                english = trans
+                russian = orig
+            }
+
+            let added = self.vocabStore.addCard(english: english, russian: russian)
+            self.hud.viewModel.isSavedToVocab = true
+            self.flashcardsViewModel?.refreshQueue()
+            if !added {
+                // Already saved — keep bookmark highlighted
+            }
         }
 
         hud.onExplainPhrase = { [weak self] in
@@ -361,6 +392,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quickItem.target = self
         menu.addItem(quickItem)
 
+        let dueCount = vocabStore.dueCards().count
+        let learnTitle = dueCount > 0
+            ? "Тренажёр английского (\(dueCount) к повторению) (\(cfg.flashcardsHotkey.displayString))"
+            : "Тренажёр английского (\(vocabStore.cards.count)) (\(cfg.flashcardsHotkey.displayString))"
+        let learnItem = NSMenuItem(
+            title: learnTitle,
+            action: #selector(menuOpenFlashcards),
+            keyEquivalent: ""
+        )
+        learnItem.target = self
+        menu.addItem(learnItem)
+
         menu.addItem(.separator())
 
         // Tone selector submenu
@@ -457,6 +500,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openQuickTranslator()
     }
 
+    @objc private func menuOpenFlashcards() {
+        openFlashcards()
+    }
+
     @objc private func menuOpenGlossary() {
         openSettings(tab: .glossary)
     }
@@ -537,6 +584,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             runSelectedTextTranslation(replaceInPlace: true, forcePolish: true)
         case .openQuickWindow:
             openQuickTranslator()
+        case .openFlashcards:
+            openFlashcards()
         }
     }
 
@@ -666,6 +715,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.ollamaOnline = true
                     self.lastPopupResult = result
                     self.isTranslating = false
+                    self.hud.viewModel.isSavedToVocab = self.vocabStore.contains(
+                        english: (result.direction == .enToRu) ? result.originalText : result.translatedText
+                    )
                     self.hud.finishStreamingPopup(result: result)
                     self.historyStore.record(result)
                 } catch OllamaError.cancelled {
@@ -785,6 +837,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.center()
 
         quickWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func openFlashcards() {
+        if let win = flashcardsWindow {
+            flashcardsViewModel?.refreshQueue()
+            NSApp.activate(ignoringOtherApps: true)
+            win.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let vm = FlashcardsViewModel(vocabStore: vocabStore, ollamaClient: ollamaClient)
+        flashcardsViewModel = vm
+
+        let view = FlashcardsRootView(vm: vm, vocabStore: vocabStore)
+        let hosting = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Тренажёр английского (SRS)"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        flashcardsWindow = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }

@@ -26,6 +26,7 @@ Grab the prebuilt Apple Silicon bundle from **[GitHub Releases](https://github.c
 | **`⌃⌥P`** | **Floating Translation Popup** — live real-time streaming, one-click tone switching, alternative phrasing (`↻`), English polish (`✨`), inline glossary add, and context-aware reply to clients |
 | **`⌃⌥E`** | **Polish English (`EN ✨ EN`)** — fixes grammar and makes your English sound native right in place |
 | **`⌃⌥G`** | **Quick Translator Window** — standalone floating composer (`⌘↩` to translate, `⌘⇧C` to copy) |
+| **`⌃⌥L`** | **English Trainer (SRS Flashcards)** — practice saved work phrases with spaced repetition, pronunciation, and AI feedback |
 | **`Esc`** | Cancel an active translation or close the popup |
 
 All shortcuts can be customized in **Settings → Hotkeys**.
@@ -36,6 +37,10 @@ All shortcuts can be customized in **Settings → Hotkeys**.
 - **Auto-select input field**: if you didn't highlight text before pressing `⌃⌥T` or `⌃⌥E`, the app grabs the whole message in the active input box (with a length safety guard so it won't replace large documents).
 - **Real-time streaming**: words appear within ~0.2s in the floating popup (`⌃⌥P`) and Quick Translator (`⌃⌥G`).
 - **Context-aware client replies**: highlight an incoming client message → press `⌃⌥P` → click **Reply**, type your answer in Russian, and hit `Enter`. The model uses the client's message as context to produce a natural English reply ready to copy or paste straight into the chat.
+- **Active English Learning Suite**:
+  - **AI English Coach (`🎓`)** — get a concise Russian breakdown of key vocabulary, phrasal verbs, grammar improvements, and tone nuances right inside the popup or Quick Translator.
+  - **Native Pronunciation (`🔊`)** — listen to any English phrase offline using macOS native speech synthesis.
+  - **Spaced-Repetition Flashcards (`⌃⌥L`)** — bookmark real phrases (`★`) from popups or translation history, practice `RU → EN` / `EN → RU` with SM-2-lite scheduling, type your own English translation for instant AI grading, track your daily streak (`🔥`), and export your deck to **Anki (`.tsv`)**.
 - **Custom Glossary / Word Replacements**: define preferred translations or strict substitutions per word/phrase — either from Settings or inline right inside the popup:
   - *AI Hint* — injected into the system prompt so the term is inflected naturally in context.
   - *Exact Replace* — enforces strict post-translation replacement while preserving capitalization and word boundaries.
