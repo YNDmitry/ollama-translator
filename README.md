@@ -1,38 +1,72 @@
-# Ollama Translator (RU ↔ EN) для macOS — v2.0
+# Ollama Translator (RU ↔ EN) for macOS
 
-Нативное мини-приложение в строке меню macOS для быстрого локального перевода общения с клиентами через Ollama (`hf.co/mradermacher/Qwen3.5-4B-SOMPOA-heresy-v2-GGUF:Q4_K_M`).
+**English** | [Русский](README.ru.md)
 
-## Горячие клавиши (работают в любой раскладке RU / EN)
+A lightweight, native macOS menu bar app for fast local **Russian ↔ English** translation powered by [Ollama](https://ollama.com) — built specifically for smooth client communication in Telegram, Slack, WhatsApp, Mail, browsers, and any other app.
 
-| Комбинация | Действие |
+Zero cloud APIs, zero subscriptions, 100% local and private. Pre-configured for `hf.co/mradermacher/Qwen3.5-4B-SOMPOA-heresy-v2-GGUF:Q4_K_M` (and works with any Ollama model).
+
+## Download
+
+Grab the prebuilt Apple Silicon bundle from **[GitHub Releases](https://github.com/YNDmitry/ollama-translator/releases/latest)**:
+
+1. Download and unzip `OllamaTranslator-v2.0.0-arm64.zip`.
+2. Drag `OllamaTranslator.app` to `/Applications/`.
+3. If macOS Gatekeeper warns about an unsigned app, clear quarantine:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/OllamaTranslator.app
+   ```
+4. Launch the app and grant **System Settings → Privacy & Security → Accessibility** so it can read selected text and paste translations in place.
+
+## Global Hotkeys (work in both RU & EN keyboard layouts)
+
+| Shortcut | Action |
 |---|---|
-| **`⌃⌥T`** | **Перевести и заменить на месте** (если ничего не выделено — автоматически выбирает всё поле ввода `⌘A`) |
-| **`⌃⌥P`** | **Показать перевод во всплывающем окне** со стримингом в реальном времени, сменой тона, другим вариантом и ответом клиенту |
-| **`⌃⌥E`** | **Улучшить мой английский (`EN ✨ EN`)** — исправляет ошибки и делает фразу естественной прямо на месте |
-| **`⌃⌥G`** | **Окно быстрого переводчика** (`⌘↩` — перевести, `⌘⇧C` — скопировать) |
-| **`Esc`** | Отменить идущий перевод или закрыть всплывающее окно |
+| **`⌃⌥T`** | **Translate & Replace in place** — replaces selected text directly inside any input field (automatically selects the entire input field via `⌘A` if nothing is selected) |
+| **`⌃⌥P`** | **Floating Translation Popup** — live real-time streaming, one-click tone switching, alternative phrasing (`↻`), English polish (`✨`), inline glossary add, and context-aware reply to clients |
+| **`⌃⌥E`** | **Polish English (`EN ✨ EN`)** — fixes grammar and makes your English sound native right in place |
+| **`⌃⌥G`** | **Quick Translator Window** — standalone floating composer (`⌘↩` to translate, `⌘⇧C` to copy) |
+| **`Esc`** | Cancel an active translation or close the popup |
 
-## Возможности v2.0
+All shortcuts can be customized in **Settings → Hotkeys**.
 
-- **Автовыбор поля ввода без выделения** — напечатал сообщение в Telegram/Slack/WhatsApp, нажал `⌃⌥T` (или `⌃⌥E`) без выделения, и оно сразу заменилось переводом (с защитой от случайного выбора слишком длинных страниц).
-- **Стриминг в реальном времени** — во всплывающем окне (`⌃⌥P`) и быстром переводчике (`⌃⌥G`) слова появляются сразу через ~0.2 сек.
-- **Ответ клиенту с учётом контекста прямо из всплывашки** — выделил сообщение клиента → нажал `⌃⌥P` → прочитал перевод → нажал **«Ответить»**, написал по-русски и нажал `Enter` → получил естественный EN-ответ с учётом письма клиента → кнопка **«Вставить в чат»** или **«Копировать ответ»**.
-- **Улучшение английского (`EN ✨ EN`) + «Другой вариант» (`↻`)** — можно полировать свой английский или в 1 клик получить альтернативную формулировку.
-- **Словарь замен (глоссарий)** — добавление слов прямо из всплывающего окна (иконка книги) или в Настройках. Два режима: *Подсказка ИИ* и *Точная замена*.
-- **История переводов** — последние 50 переводов с поиском в Настройках и быстрым копированием последних 10 прямо из меню-бара.
-- **Статус Ollama в меню-баре** — показывает подключение и умеет запускать Ollama в 1 клик.
+## Features
 
-## Сборка и обновление
+- **In-place replacement + clipboard safety**: replaces your text directly in chat and automatically restores your previous clipboard contents.
+- **Auto-select input field**: if you didn't highlight text before pressing `⌃⌥T` or `⌃⌥E`, the app grabs the whole message in the active input box (with a length safety guard so it won't replace large documents).
+- **Real-time streaming**: words appear within ~0.2s in the floating popup (`⌃⌥P`) and Quick Translator (`⌃⌥G`).
+- **Context-aware client replies**: highlight an incoming client message → press `⌃⌥P` → click **Reply**, type your answer in Russian, and hit `Enter`. The model uses the client's message as context to produce a natural English reply ready to copy or paste straight into the chat.
+- **Custom Glossary / Word Replacements**: define preferred translations or strict substitutions per word/phrase — either from Settings or inline right inside the popup:
+  - *AI Hint* — injected into the system prompt so the term is inflected naturally in context.
+  - *Exact Replace* — enforces strict post-translation replacement while preserving capitalization and word boundaries.
+- **Tone Presets**: switch between *Business*, *Friendly*, *Concise*, and *Neutral* from the menu bar or directly inside the popup.
+- **Translation History**: last 50 translations searchable in Settings, plus the last 10 accessible for 1-click copy from the menu bar.
+- **Optimized for Qwen3.5**: disables reasoning mode (`think: false`), strips residual `<think>` tags, and keeps the model warm in memory (`keep_alive: 30m`).
+- **Ollama Status & Launcher**: live connection indicator in the menu bar with 1-click Ollama launch if it isn't running.
+
+## Build from Source
+
+Requires macOS 13+ and Xcode Command Line Tools (`swiftc`). No external Swift dependencies.
 
 ```bash
+git clone https://github.com/YNDmitry/ollama-translator.git
+cd ollama-translator
 ./scripts/build_app.sh
-killall OllamaTranslator 2>/dev/null || true
-rm -rf /Applications/OllamaTranslator.app
 cp -R dist/OllamaTranslator.app /Applications/
 open /Applications/OllamaTranslator.app
 ```
 
-## Конфигурация и история
+Make sure Ollama is running and your model is pulled:
 
-- Настройки и словарь: `~/Library/Application Support/OllamaTranslator/config.json`
-- История переводов: `~/Library/Application Support/OllamaTranslator/history.json`
+```bash
+ollama run hf.co/mradermacher/Qwen3.5-4B-SOMPOA-heresy-v2-GGUF:Q4_K_M
+```
+
+## Configuration Files
+
+- Settings & glossary: `~/Library/Application Support/OllamaTranslator/config.json`
+- Translation history: `~/Library/Application Support/OllamaTranslator/history.json`
+
+## License
+
+[MIT](LICENSE)
